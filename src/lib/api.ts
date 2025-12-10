@@ -53,3 +53,74 @@ export async function uploadDocuments(files: File[]): Promise<UploadedDocumentRe
     pages: item.pages ?? null,
   }));
 }
+
+export async function uploadSingleDocument(
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<UploadedDocumentResult> {
+  const formData = new FormData();
+  formData.append("files", file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    // Track upload progress
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable && onProgress) {
+        // Upload progress: 0-70% (uploading phase)
+        const uploadProgress = Math.min(70, Math.round((e.loaded / e.total) * 70));
+        onProgress(uploadProgress);
+      }
+    });
+
+    xhr.addEventListener("load", async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          // Processing progress: 70-90%
+          if (onProgress) onProgress(90);
+
+          const payload = await parseJsonResponse(new Response(xhr.responseText));
+          
+          if (!Array.isArray(payload) || payload.length === 0) {
+            throw new Error("Unexpected upload response format.");
+          }
+
+          const item = payload[0];
+          
+          // Complete: 100%
+          if (onProgress) onProgress(100);
+
+          resolve({
+            id: crypto.randomUUID(),
+            fileName: item.fileName ?? "Unknown",
+            text: item.text ?? "",
+            whisperHash: item.whisperHash ?? "",
+            boundingBoxes: item.boundingBoxes ?? null,
+            pages: item.pages ?? null,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("Failed to parse response"));
+        }
+      } else {
+        try {
+          const payload = await parseJsonResponse(new Response(xhr.responseText));
+          const message = payload?.detail || payload?.message || xhr.statusText;
+          reject(new Error(message || `Request failed with status ${xhr.status}`));
+        } catch {
+          reject(new Error(`Request failed with status ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error occurred during upload"));
+    });
+
+    xhr.addEventListener("abort", () => {
+      reject(new Error("Upload was aborted"));
+    });
+
+    xhr.open("POST", buildUrl("/upload"));
+    xhr.send(formData);
+  });
+}

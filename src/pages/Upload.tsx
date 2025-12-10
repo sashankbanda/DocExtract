@@ -4,7 +4,7 @@ import { toast } from "@/components/ui/use-toast";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { FileListItem } from "@/components/upload/FileListItem";
 import { useExtractionContext } from "@/context/ExtractionContext";
-import { uploadDocuments } from "@/lib/api";
+import { uploadSingleDocument } from "@/lib/api";
 import { UploadFile, UploadedDocumentResult } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, FileText, Upload } from "lucide-react";
@@ -31,90 +31,118 @@ export default function UploadPage() {
   }, []);
 
   const handleRemoveFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+    setFiles((prev) => {
+      const file = prev.find((f) => f.id === id);
+      // Prevent removing files that are currently uploading or processing
+      if (file && (file.status === "uploading" || file.status === "processing")) {
+        return prev;
+      }
+      return prev.filter((f) => f.id !== id);
+    });
   }, []);
 
   const handleUpload = useCallback(async () => {
-    if (files.length === 0 || isUploading) return;
+    const filesToUpload = files.filter((f) => f.status === "pending" && f.file);
+    if (filesToUpload.length === 0 || isUploading) return;
+
     setIsUploading(true);
-    setFiles((prev) =>
-      prev.map((file) => ({ ...file, status: "uploading", progress: 10, error: undefined }))
-    );
+    const uploadedResults: UploadedDocumentResult[] = [];
 
-    try {
-      const payloadFiles = files
-        .map((file) => file.file)
-        .filter((file): file is File => Boolean(file));
+    // Upload files sequentially with individual progress tracking
+    for (const uploadFile of filesToUpload) {
+      if (!uploadFile.file) continue;
 
-      if (payloadFiles.length === 0) {
-        throw new Error("No valid files to upload.");
-      }
+      const fileId = uploadFile.id;
 
-      setFiles((prev) => prev.map((file) => ({ ...file, status: "processing", progress: 35 })));
+      try {
+        // Initialize upload state
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileId
+              ? { ...f, status: "uploading", progress: 0, error: undefined }
+              : f
+          )
+        );
 
-      const results = await uploadDocuments(payloadFiles);
-
-      const resultMap = new Map<string, UploadedDocumentResult[]>();
-      results.forEach((result) => {
-        const list = resultMap.get(result.fileName) ?? [];
-        list.push(result);
-        resultMap.set(result.fileName, list);
-      });
-      const remainingResults = [...results];
-
-      setFiles((prev) =>
-        prev.map((file) => {
-          const matches = resultMap.get(file.name);
-          let matched: UploadedDocumentResult | undefined;
-
-          if (matches && matches.length > 0) {
-            matched = matches.shift();
-            if (matched) {
-              const idx = remainingResults.findIndex((item) => item === matched);
-              if (idx >= 0) {
-                remainingResults.splice(idx, 1);
+        // Upload with progress tracking
+        const result = await uploadSingleDocument(uploadFile.file, (progress) => {
+          setFiles((prev) =>
+            prev.map((f) => {
+              if (f.id === fileId) {
+                const status = progress < 70 ? "uploading" : progress < 100 ? "processing" : "complete";
+                return { ...f, progress, status };
               }
-            }
-          } else if (remainingResults.length > 0) {
-            matched = remainingResults.shift();
-          }
+              return f;
+            })
+          );
+        });
 
-          if (matched) {
-            return { ...file, status: "complete", progress: 100 };
-          }
-          return {
-            ...file,
-            status: "error",
-            progress: 0,
-            error: "No response for this file.",
-          };
-        })
-      );
+        // Update file with result data
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileId
+              ? {
+                  ...f,
+                  status: "complete",
+                  progress: 100,
+                  whisperHash: result.whisperHash,
+                  extraction: {
+                    text: result.text,
+                    boundingBoxes: result.boundingBoxes,
+                    pages: result.pages,
+                  },
+                }
+              : f
+          )
+        );
 
-      addDocuments(results);
+        uploadedResults.push(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed.";
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileId
+              ? {
+                  ...f,
+                  status: "error",
+                  progress: 0,
+                  error: message,
+                }
+              : f
+          )
+        );
+      }
+    }
+
+    // Update context and navigate if we have successful uploads
+    if (uploadedResults.length > 0) {
+      addDocuments(uploadedResults);
       toast({
         title: "Upload complete",
-        description: `${results.length} file${results.length === 1 ? "" : "s"} processed successfully.`,
+        description: `${uploadedResults.length} file${uploadedResults.length === 1 ? "" : "s"} processed successfully.`,
       });
-      navigate("/workspace");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed.";
-      setFiles((prev) =>
-        prev.map((file) => ({
-          ...file,
-          status: "error",
-          progress: 0,
-          error: message,
-        }))
-      );
+
+      // Navigate to workspace with uploaded files data
+      navigate("/workspace", {
+        state: {
+          uploadedFiles: uploadedResults.map((result) => ({
+            name: result.fileName,
+            text: result.text,
+            whisperHash: result.whisperHash,
+            boundingBoxes: result.boundingBoxes,
+            pages: result.pages,
+          })),
+        },
+      });
+    } else {
       toast({
         title: "Upload failed",
-        description: message,
+        description: "No files were successfully uploaded.",
         variant: "destructive",
       });
-    } finally {
-      setIsUploading(false);
     }
+
+    setIsUploading(false);
   }, [files, isUploading, addDocuments, navigate]);
 
   // Check if all files are complete

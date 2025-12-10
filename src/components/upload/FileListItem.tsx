@@ -54,7 +54,13 @@ function FileListItem({ file, onRemove }: FileListItemProps, ref) {
             </h4>
             <button
               onClick={() => onRemove(file.id)}
-              className="p-1 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+              disabled={isLoading}
+              className={cn(
+                "p-1 rounded-lg transition-colors",
+                isLoading
+                  ? "opacity-50 cursor-not-allowed text-muted-foreground"
+                  : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+              )}
             >
               <X className="w-4 h-4" />
             </button>

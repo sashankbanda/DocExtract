@@ -30,20 +30,42 @@ function isAllowedFile(file: File): boolean {
 
 export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [dragCounter, setDragCounter] = useState(0);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled) {
+      setDragCounter((prev) => prev + 1);
+      setIsDragOver(true);
+    }
+  }, [disabled]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (!disabled) setIsDragOver(true);
-  }, [disabled]);
+    e.stopPropagation();
+    if (!disabled && !isDragOver) {
+      setIsDragOver(true);
+    }
+  }, [disabled, isDragOver]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOver(false);
+    e.stopPropagation();
+    setDragCounter((prev) => {
+      const newCount = prev - 1;
+      if (newCount === 0) {
+        setIsDragOver(false);
+      }
+      return newCount;
+    });
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(false);
+    setDragCounter(0);
     if (disabled) return;
 
     const files = Array.from(e.dataTransfer.files).filter(isAllowedFile);
@@ -67,6 +89,7 @@ export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
           : "border-border hover:border-primary/50 hover:bg-muted/30",
         disabled && "opacity-50 cursor-not-allowed"
       )}
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

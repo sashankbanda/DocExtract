@@ -7,6 +7,12 @@ export interface UploadFile {
   status: 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
   file?: File;
   error?: string;
+  whisperHash?: string;
+  extraction?: {
+    text: string;
+    boundingBoxes?: Record<string, unknown> | null;
+    pages?: unknown[] | null;
+  };
 }
 
 export interface BoundingBox {

@@ -8,18 +8,12 @@ import { useExtractionContext } from "@/context/ExtractionContext";
 import { cn } from "@/lib/utils";
 import {
     BoundingBox,
-    ExtractedField,
-    ExtractedTable,
-    LayoutText,
     UploadedDocumentResult,
 } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
 import { FileText, Table, Tag, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const EMPTY_TABLES: ExtractedTable[] = [];
-const EMPTY_FIELDS: ExtractedField[] = [];
 
 type TabType = "text" | "tables" | "fields";
 
@@ -36,6 +30,8 @@ export default function Workspace() {
   const [activeTab, setActiveTab] = useState<TabType>("text");
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
+  const [selectedWordIndexes, setSelectedWordIndexes] = useState<number[]>([]);
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!documents.length) {
@@ -53,21 +49,19 @@ export default function Workspace() {
     return documents.find((doc) => doc.id === selectedFileId) ?? documents[0];
   }, [documents, selectedFileId]);
 
-  const layoutItems = useMemo<LayoutText[]>(() => {
-    if (!selectedDocument?.text) {
-      return [];
-    }
-    const chunks = selectedDocument.text.split(/\n{2,}/);
-    return chunks
-      .map((chunk, index) => chunk.trim())
-      .filter(Boolean)
-      .map((chunk, index) => ({
-        id: `${selectedDocument.id}-p-${index}`,
-        type: "paragraph" as const,
-        text: chunk,
-      }));
-  }, [selectedDocument]);
 
+  // Handle word index highlighting (new API)
+  const handleWordIndexHover = useCallback((wordIndexes: number[] | null) => {
+    setSelectedWordIndexes(wordIndexes || []);
+  }, []);
+
+  const handleWordIndexClick = useCallback((wordIndexes: number[]) => {
+    setSelectedWordIndexes(wordIndexes);
+    setActiveHighlightId(`highlight-${Date.now()}`);
+    setTimeout(() => setActiveHighlightId(null), 1000);
+  }, []);
+
+  // Legacy bounding box handlers (for backward compatibility)
   const handleItemHover = useCallback((boundingBox: BoundingBox | null) => {
     setHoveredBoundingBox(boundingBox);
   }, []);
@@ -107,34 +101,34 @@ export default function Workspace() {
 
     switch (activeTab) {
       case "text":
-        return layoutItems.length ? (
+        return selectedDocument ? (
           <ExtractedTextPanel
-            items={layoutItems}
-            onItemHover={handleItemHover}
-            onItemClick={handleItemClick}
+            document={selectedDocument}
+            onLineClick={handleWordIndexClick}
+            onLineHover={handleWordIndexHover}
           />
         ) : (
           <EmptyState message="No text was returned for this document." />
         );
       case "tables":
-        return EMPTY_TABLES.length ? (
+        // TODO: Get structured fields from API or context
+        // For now, using empty array - will be populated when extract-fields API is called
+        return (
           <StructuredTablePanel
-            tables={EMPTY_TABLES}
-            onTableHover={handleItemHover}
-            onCellClick={handleItemClick}
+            fields={[]}
+            onFieldClick={handleWordIndexClick}
+            onFieldHover={handleWordIndexHover}
           />
-        ) : (
-          <EmptyState message="No structured tables extracted yet." />
         );
       case "fields":
-        return EMPTY_FIELDS.length ? (
+        // TODO: Get template fields from API or context
+        // For now, using empty array - will be populated when extract-fields API is called
+        return (
           <TemplateFieldsPanel
-            fields={EMPTY_FIELDS}
-            onFieldHover={handleItemHover}
-            onFieldClick={handleItemClick}
+            fields={[]}
+            onFieldClick={handleWordIndexClick}
+            onFieldHover={handleWordIndexHover}
           />
-        ) : (
-          <EmptyState message="Template-based fields will appear here once defined." />
         );
       default:
         return null;
@@ -148,6 +142,9 @@ export default function Workspace() {
           <PDFViewerWrapper
             documentId={selectedDocument?.id ?? ""}
             fileName={selectedDocument?.fileName}
+            boundingBoxes={selectedDocument?.boundingBoxes}
+            selectedIndexes={selectedWordIndexes}
+            activeHighlightId={activeHighlightId}
             highlights={allHighlights}
             activeHighlight={activeBoundingBox}
           />
