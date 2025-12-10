@@ -1,7 +1,8 @@
-import { motion } from "framer-motion";
-import { FileText, X, Check, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UploadFile } from "@/types/document";
+import { motion } from "framer-motion";
+import { AlertCircle, Check, FileText, Loader2, X } from "lucide-react";
+import { forwardRef } from "react";
 import { ProgressBar } from "./ProgressBar";
 
 interface FileListItemProps {
@@ -17,7 +18,8 @@ const statusConfig = {
   error: { icon: AlertCircle, color: "text-destructive", label: "Error" },
 };
 
-export function FileListItem({ file, onRemove }: FileListItemProps) {
+export const FileListItem = forwardRef<HTMLDivElement, FileListItemProps>(
+function FileListItem({ file, onRemove }: FileListItemProps, ref) {
   const status = statusConfig[file.status];
   const StatusIcon = status.icon;
   const isLoading = file.status === "uploading" || file.status === "processing";
@@ -30,6 +32,7 @@ export function FileListItem({ file, onRemove }: FileListItemProps) {
 
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0, x: -20, height: 0 }}
       animate={{ opacity: 1, x: 0, height: "auto" }}
@@ -68,8 +71,11 @@ export function FileListItem({ file, onRemove }: FileListItemProps) {
 
           {/* Progress Bar */}
           <ProgressBar progress={file.progress} status={file.status} />
+          {file.status === "error" && file.error && (
+            <p className="mt-2 text-xs text-destructive">{file.error}</p>
+          )}
         </div>
       </div>
     </motion.div>
   );
-}
+});

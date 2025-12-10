@@ -1,7 +1,7 @@
+import { cn } from "@/lib/utils";
+import { BoundingBox, LayoutText } from "@/types/document";
 import { motion } from "framer-motion";
 import { FileText, Heading1, List } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { LayoutText, BoundingBox } from "@/types/document";
 
 interface ExtractedTextPanelProps {
   items: LayoutText[];
@@ -34,9 +34,9 @@ export function ExtractedTextPanel({
               "p-4 rounded-xl glass cursor-pointer transition-all duration-200",
               "hover:bg-[hsl(var(--glass-bg)/0.8)] hover:border-primary/30 hover:glow-primary-subtle"
             )}
-            onMouseEnter={() => onItemHover(item.boundingBox)}
+            onMouseEnter={() => onItemHover(item.boundingBox ?? null)}
             onMouseLeave={() => onItemHover(null)}
-            onClick={() => onItemClick(item.boundingBox)}
+            onClick={() => item.boundingBox && onItemClick(item.boundingBox)}
           >
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">

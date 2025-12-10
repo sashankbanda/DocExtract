@@ -6,6 +6,7 @@ export interface UploadFile {
   progress: number;
   status: 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
   file?: File;
+  error?: string;
 }
 
 export interface BoundingBox {
@@ -21,7 +22,8 @@ export interface ExtractedField {
   label: string;
   value: string;
   confidence: number;
-  boundingBox: BoundingBox;
+  boundingBox?: BoundingBox;
+  wordIndexes?: number[];
 }
 
 export interface TableCell {
@@ -33,14 +35,14 @@ export interface ExtractedTable {
   id: string;
   headers: string[];
   rows: TableCell[][];
-  boundingBox: BoundingBox;
+  boundingBox?: BoundingBox;
 }
 
 export interface LayoutText {
   id: string;
   text: string;
   type: 'paragraph' | 'heading' | 'list-item';
-  boundingBox: BoundingBox;
+  boundingBox?: BoundingBox;
 }
 
 export interface DocumentExtraction {
@@ -49,4 +51,13 @@ export interface DocumentExtraction {
   layoutText: LayoutText[];
   tables: ExtractedTable[];
   templateFields: ExtractedField[];
+}
+
+export interface UploadedDocumentResult {
+  id: string;
+  fileName: string;
+  text: string;
+  whisperHash: string;
+  boundingBoxes?: Record<string, unknown> | null;
+  pages?: unknown[] | null;
 }

@@ -1,17 +1,21 @@
-import { useState, useCallback, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
-import { GlassCard } from "@/components/ui/GlassCard";
 import { GlassButton } from "@/components/ui/GlassButton";
+import { GlassCard } from "@/components/ui/GlassCard";
+import { toast } from "@/components/ui/use-toast";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { FileListItem } from "@/components/upload/FileListItem";
-import { UploadFile } from "@/types/document";
-import { Upload, ArrowRight, FileText } from "lucide-react";
+import { useExtractionContext } from "@/context/ExtractionContext";
+import { uploadDocuments } from "@/lib/api";
+import { UploadFile, UploadedDocumentResult } from "@/types/document";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowRight, FileText, Upload } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function UploadPage() {
   const navigate = useNavigate();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const { addDocuments } = useExtractionContext();
 
   const handleFilesAdded = useCallback((newFiles: File[]) => {
     const uploadFiles: UploadFile[] = newFiles.map((file) => ({
@@ -30,57 +34,99 @@ export default function UploadPage() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
-  // Simulate upload process
-  const handleUpload = useCallback(() => {
+  const handleUpload = useCallback(async () => {
     if (files.length === 0 || isUploading) return;
     setIsUploading(true);
+    setFiles((prev) =>
+      prev.map((file) => ({ ...file, status: "uploading", progress: 10, error: undefined }))
+    );
 
-    files.forEach((file, index) => {
-      // Simulate upload progress
-      let progress = 0;
-      const uploadInterval = setInterval(() => {
-        progress += Math.random() * 15 + 5;
-        if (progress >= 100) {
-          progress = 100;
-          clearInterval(uploadInterval);
+    try {
+      const payloadFiles = files
+        .map((file) => file.file)
+        .filter((file): file is File => Boolean(file));
 
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === file.id ? { ...f, progress: 100, status: "processing" as const } : f
-            )
-          );
+      if (payloadFiles.length === 0) {
+        throw new Error("No valid files to upload.");
+      }
 
-          // Simulate processing
-          setTimeout(() => {
-            setFiles((prev) =>
-              prev.map((f) =>
-                f.id === file.id ? { ...f, status: "complete" as const } : f
-              )
-            );
-          }, 1500 + index * 500);
-        } else {
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === file.id
-                ? { ...f, progress: Math.min(progress, 95), status: "uploading" as const }
-                : f
-            )
-          );
-        }
-      }, 200);
-    });
-  }, [files, isUploading]);
+      setFiles((prev) => prev.map((file) => ({ ...file, status: "processing", progress: 35 })));
 
-  // Check if all files are complete
-  const allComplete = files.length > 0 && files.every((f) => f.status === "complete");
-  const hasFiles = files.length > 0;
+      const results = await uploadDocuments(payloadFiles);
 
-  // Navigate to workspace when all complete
-  useEffect(() => {
-    if (allComplete) {
+      const resultMap = new Map<string, UploadedDocumentResult[]>();
+      results.forEach((result) => {
+        const list = resultMap.get(result.fileName) ?? [];
+        list.push(result);
+        resultMap.set(result.fileName, list);
+      });
+      const remainingResults = [...results];
+
+      setFiles((prev) =>
+        prev.map((file) => {
+          const matches = resultMap.get(file.name);
+          let matched: UploadedDocumentResult | undefined;
+
+          if (matches && matches.length > 0) {
+            matched = matches.shift();
+            if (matched) {
+              const idx = remainingResults.findIndex((item) => item === matched);
+              if (idx >= 0) {
+                remainingResults.splice(idx, 1);
+              }
+            }
+          } else if (remainingResults.length > 0) {
+            matched = remainingResults.shift();
+          }
+
+          if (matched) {
+            return { ...file, status: "complete", progress: 100 };
+          }
+          return {
+            ...file,
+            status: "error",
+            progress: 0,
+            error: "No response for this file.",
+          };
+        })
+      );
+
+      addDocuments(results);
+      toast({
+        title: "Upload complete",
+        description: `${results.length} file${results.length === 1 ? "" : "s"} processed successfully.`,
+      });
+      navigate("/workspace");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed.";
+      setFiles((prev) =>
+        prev.map((file) => ({
+          ...file,
+          status: "error",
+          progress: 0,
+          error: message,
+        }))
+      );
+      toast({
+        title: "Upload failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
       setIsUploading(false);
     }
-  }, [allComplete]);
+  }, [files, isUploading, addDocuments, navigate]);
+
+  // Check if all files are complete
+  const hasFiles = files.length > 0;
+  const isProcessing = files.some((file) => file.status === "uploading" || file.status === "processing");
+  const anySuccessful = files.some((file) => file.status === "complete");
+
+  useEffect(() => {
+    if (!isProcessing) {
+      setIsUploading(false);
+    }
+  }, [isProcessing]);
 
   return (
     <div className="min-h-screen pt-24 pb-12 px-6">
@@ -95,13 +141,13 @@ export default function UploadPage() {
             Upload Documents
           </h1>
           <p className="text-muted-foreground">
-            Drop your PDF files below to begin extraction
+            Drop your PDF, image, DOCX, or XLSX files below to begin extraction
           </p>
         </motion.div>
 
         {/* Upload Card */}
         <GlassCard className="mb-6">
-          <FileDropzone onFilesAdded={handleFilesAdded} disabled={isUploading} />
+          <FileDropzone onFilesAdded={handleFilesAdded} disabled={isUploading || isProcessing} />
         </GlassCard>
 
         {/* File List */}
@@ -140,34 +186,33 @@ export default function UploadPage() {
           transition={{ delay: 0.2 }}
           className="flex flex-col sm:flex-row gap-4 justify-center"
         >
-          {!allComplete ? (
-            <GlassButton
-              variant="primary"
-              size="lg"
-              onClick={handleUpload}
-              disabled={!hasFiles || isUploading}
-              className="min-w-[200px]"
-            >
-              {isUploading ? (
-                <>
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                  >
-                    <Upload className="w-5 h-5" />
-                  </motion.div>
-                  Processing...
-                </>
-              ) : (
-                <>
+          <GlassButton
+            variant="primary"
+            size="lg"
+            onClick={handleUpload}
+            disabled={!hasFiles || isUploading || isProcessing}
+            className="min-w-[200px]"
+          >
+            {isUploading || isProcessing ? (
+              <>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                >
                   <Upload className="w-5 h-5" />
-                  Upload & Extract
-                </>
-              )}
-            </GlassButton>
-          ) : (
+                </motion.div>
+                Processing...
+              </>
+            ) : (
+              <>
+                <Upload className="w-5 h-5" />
+                {anySuccessful ? "Upload More" : "Upload & Extract"}
+              </>
+            )}
+          </GlassButton>
+          {anySuccessful && (
             <GlassButton
-              variant="primary"
+              variant="ghost"
               size="lg"
               onClick={() => navigate("/workspace")}
               className="min-w-[200px]"

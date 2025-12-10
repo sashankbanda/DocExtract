@@ -7,16 +7,57 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Runtime and cache
 node_modules
 dist
 dist-ssr
+.vite
+.turbo
+.parcel-cache
+.eslintcache
+.cache
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
 *.local
 
-# Editor directories and files
+# Package managers
+.pnp*
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnpm-store
+
+# Bun
+.bun
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+env/
+venv/
+.venv/
+backend/.venv/
+pip-wheel-metadata/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+build/
+
+# Editors and IDEs
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj

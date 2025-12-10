@@ -1,50 +1,25 @@
-import { useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Table, Tag } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { TwoPaneLayout } from "@/components/workspace/TwoPaneLayout";
+import { ExtractedTextPanel } from "@/components/workspace/ExtractedTextPanel";
 import { FileSelectorDropdown } from "@/components/workspace/FileSelectorDropdown";
 import { PDFViewerWrapper } from "@/components/workspace/PDFViewerWrapper";
-import { ExtractedTextPanel } from "@/components/workspace/ExtractedTextPanel";
 import { StructuredTablePanel } from "@/components/workspace/StructuredTablePanel";
 import { TemplateFieldsPanel } from "@/components/workspace/TemplateFieldsPanel";
-import { BoundingBox, LayoutText, ExtractedTable, ExtractedField } from "@/types/document";
+import { TwoPaneLayout } from "@/components/workspace/TwoPaneLayout";
+import { useExtractionContext } from "@/context/ExtractionContext";
+import { cn } from "@/lib/utils";
+import {
+    BoundingBox,
+    ExtractedField,
+    ExtractedTable,
+    LayoutText,
+    UploadedDocumentResult,
+} from "@/types/document";
+import { AnimatePresence, motion } from "framer-motion";
+import { FileText, Table, Tag, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-// Mock data
-const mockFiles = [
-  { id: "1", name: "Invoice_2024_001.pdf" },
-  { id: "2", name: "Contract_Agreement.pdf" },
-  { id: "3", name: "Financial_Report_Q4.pdf" },
-];
-
-const mockLayoutText: LayoutText[] = [
-  { id: "1", type: "heading", text: "Invoice #INV-2024-001", boundingBox: { x: 50, y: 50, width: 200, height: 30, page: 1 } },
-  { id: "2", type: "paragraph", text: "Thank you for your business. Please find the invoice details below.", boundingBox: { x: 50, y: 100, width: 400, height: 40, page: 1 } },
-  { id: "3", type: "list-item", text: "• Web Development Services - 40 hours @ $40/hr", boundingBox: { x: 50, y: 200, width: 350, height: 20, page: 1 } },
-  { id: "4", type: "list-item", text: "• UI/UX Design Services - 20 hours @ $42.50/hr", boundingBox: { x: 50, y: 230, width: 350, height: 20, page: 1 } },
-];
-
-const mockTables: ExtractedTable[] = [
-  {
-    id: "1",
-    headers: ["Item", "Quantity", "Unit Price", "Total"],
-    rows: [
-      [{ value: "Web Development" }, { value: "40 hrs" }, { value: "$40.00" }, { value: "$1,600.00" }],
-      [{ value: "UI Design" }, { value: "20 hrs" }, { value: "$42.50" }, { value: "$850.00" }],
-      [{ value: "Subtotal" }, { value: "" }, { value: "" }, { value: "$2,450.00" }],
-    ],
-    boundingBox: { x: 50, y: 300, width: 450, height: 120, page: 1 },
-  },
-];
-
-const mockFields: ExtractedField[] = [
-  { id: "1", label: "Invoice Number", value: "INV-2024-001", confidence: 0.98, boundingBox: { x: 380, y: 50, width: 120, height: 20, page: 1 } },
-  { id: "2", label: "Invoice Date", value: "December 10, 2024", confidence: 0.95, boundingBox: { x: 380, y: 80, width: 120, height: 20, page: 1 } },
-  { id: "3", label: "Due Date", value: "January 10, 2025", confidence: 0.92, boundingBox: { x: 380, y: 110, width: 120, height: 20, page: 1 } },
-  { id: "4", label: "Total Amount", value: "$2,450.00", confidence: 0.99, boundingBox: { x: 380, y: 420, width: 100, height: 25, page: 1 } },
-  { id: "5", label: "Vendor Name", value: "Acme Corp", confidence: 0.88, boundingBox: { x: 50, y: 150, width: 100, height: 20, page: 1 } },
-  { id: "6", label: "Payment Status", value: "Paid", confidence: 0.75, boundingBox: { x: 380, y: 450, width: 60, height: 20, page: 1 } },
-];
+const EMPTY_TABLES: ExtractedTable[] = [];
+const EMPTY_FIELDS: ExtractedField[] = [];
 
 type TabType = "text" | "tables" | "fields";
 
@@ -55,10 +30,43 @@ const tabs: { id: TabType; label: string; icon: typeof FileText }[] = [
 ];
 
 export default function Workspace() {
-  const [selectedFileId, setSelectedFileId] = useState(mockFiles[0].id);
-  const [activeTab, setActiveTab] = useState<TabType>("fields");
+  const navigate = useNavigate();
+  const { documents } = useExtractionContext();
+  const [selectedFileId, setSelectedFileId] = useState<string>(documents[0]?.id ?? "");
+  const [activeTab, setActiveTab] = useState<TabType>("text");
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
+
+  useEffect(() => {
+    if (!documents.length) {
+      return;
+    }
+    if (!selectedFileId || !documents.some((doc) => doc.id === selectedFileId)) {
+      setSelectedFileId(documents[0].id);
+    }
+  }, [documents, selectedFileId]);
+
+  const selectedDocument = useMemo<UploadedDocumentResult | null>(() => {
+    if (!documents.length) {
+      return null;
+    }
+    return documents.find((doc) => doc.id === selectedFileId) ?? documents[0];
+  }, [documents, selectedFileId]);
+
+  const layoutItems = useMemo<LayoutText[]>(() => {
+    if (!selectedDocument?.text) {
+      return [];
+    }
+    const chunks = selectedDocument.text.split(/\n{2,}/);
+    return chunks
+      .map((chunk, index) => chunk.trim())
+      .filter(Boolean)
+      .map((chunk, index) => ({
+        id: `${selectedDocument.id}-p-${index}`,
+        type: "paragraph" as const,
+        text: chunk,
+      }));
+  }, [selectedDocument]);
 
   const handleItemHover = useCallback((boundingBox: BoundingBox | null) => {
     setHoveredBoundingBox(boundingBox);
@@ -69,35 +77,67 @@ export default function Workspace() {
     setTimeout(() => setActiveBoundingBox(null), 2000);
   }, []);
 
-  // Collect all highlights
   const allHighlights = hoveredBoundingBox ? [hoveredBoundingBox] : [];
 
+  if (!documents.length) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 text-center px-6">
+        <div className="space-y-3 max-w-xl">
+          <h1 className="text-3xl font-semibold text-foreground">Upload documents to begin</h1>
+          <p className="text-muted-foreground">
+            We did not find any processed documents in this session. Upload files first to view
+            extracted text, tables, and template fields.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate("/upload")}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-primary text-primary-foreground shadow-lg hover:shadow-primary/30 transition-shadow"
+        >
+          <Upload className="w-4 h-4" />
+          Go to Uploads
+        </button>
+      </div>
+    );
+  }
+
   const renderTabContent = () => {
+    if (!selectedDocument) {
+      return <EmptyState message="Select a document to preview its extraction." />;
+    }
+
     switch (activeTab) {
       case "text":
-        return (
+        return layoutItems.length ? (
           <ExtractedTextPanel
-            items={mockLayoutText}
+            items={layoutItems}
             onItemHover={handleItemHover}
             onItemClick={handleItemClick}
           />
+        ) : (
+          <EmptyState message="No text was returned for this document." />
         );
       case "tables":
-        return (
+        return EMPTY_TABLES.length ? (
           <StructuredTablePanel
-            tables={mockTables}
+            tables={EMPTY_TABLES}
             onTableHover={handleItemHover}
             onCellClick={handleItemClick}
           />
+        ) : (
+          <EmptyState message="No structured tables extracted yet." />
         );
       case "fields":
-        return (
+        return EMPTY_FIELDS.length ? (
           <TemplateFieldsPanel
-            fields={mockFields}
+            fields={EMPTY_FIELDS}
             onFieldHover={handleItemHover}
             onFieldClick={handleItemClick}
           />
+        ) : (
+          <EmptyState message="Template-based fields will appear here once defined." />
         );
+      default:
+        return null;
     }
   };
 
@@ -106,23 +146,22 @@ export default function Workspace() {
       <TwoPaneLayout
         leftPane={
           <PDFViewerWrapper
-            documentId={selectedFileId}
+            documentId={selectedDocument?.id ?? ""}
+            fileName={selectedDocument?.fileName}
             highlights={allHighlights}
             activeHighlight={activeBoundingBox}
           />
         }
         rightPane={
           <div className="h-full flex flex-col">
-            {/* Header with file selector */}
             <div className="flex items-center justify-between p-4 border-b border-border/50">
               <FileSelectorDropdown
-                files={mockFiles}
-                selectedId={selectedFileId}
+                files={documents.map((doc) => ({ id: doc.id, name: doc.fileName }))}
+                selectedId={selectedDocument?.id ?? ""}
                 onSelect={setSelectedFileId}
               />
             </div>
 
-            {/* Tabs */}
             <div className="flex items-center gap-1 p-4 border-b border-border/50">
               {tabs.map((tab) => (
                 <button
@@ -148,7 +187,6 @@ export default function Workspace() {
               ))}
             </div>
 
-            {/* Tab Content */}
             <div className="flex-1 overflow-y-auto p-4">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -165,6 +203,14 @@ export default function Workspace() {
           </div>
         }
       />
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
+      <p className="text-sm max-w-md">{message}</p>
     </div>
   );
 }

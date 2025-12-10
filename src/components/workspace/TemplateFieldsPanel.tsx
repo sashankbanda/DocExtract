@@ -1,7 +1,7 @@
-import { motion } from "framer-motion";
-import { Tag, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ExtractedField, BoundingBox } from "@/types/document";
+import { BoundingBox, ExtractedField } from "@/types/document";
+import { motion } from "framer-motion";
+import { Sparkles, Tag } from "lucide-react";
 
 interface TemplateFieldsPanelProps {
   fields: ExtractedField[];
@@ -32,9 +32,9 @@ export function TemplateFieldsPanel({
             "p-4 rounded-xl glass cursor-pointer transition-all duration-200",
             "hover:bg-[hsl(var(--glass-bg)/0.8)] hover:border-primary/30 hover:glow-primary-subtle"
           )}
-          onMouseEnter={() => onFieldHover(field.boundingBox)}
+          onMouseEnter={() => onFieldHover(field.boundingBox ?? null)}
           onMouseLeave={() => onFieldHover(null)}
-          onClick={() => onFieldClick(field.boundingBox)}
+          onClick={() => field.boundingBox && onFieldClick(field.boundingBox)}
         >
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex items-center gap-2">

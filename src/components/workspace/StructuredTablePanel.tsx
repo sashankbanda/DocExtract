@@ -1,7 +1,7 @@
+import { cn } from "@/lib/utils";
+import { BoundingBox, ExtractedTable } from "@/types/document";
 import { motion } from "framer-motion";
 import { Table } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { ExtractedTable, BoundingBox } from "@/types/document";
 
 interface StructuredTablePanelProps {
   tables: ExtractedTable[];
@@ -23,7 +23,7 @@ export function StructuredTablePanel({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: tableIndex * 0.1 }}
           className="glass rounded-xl overflow-hidden"
-          onMouseEnter={() => onTableHover(table.boundingBox)}
+          onMouseEnter={() => onTableHover(table.boundingBox ?? null)}
           onMouseLeave={() => onTableHover(null)}
         >
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border/50">

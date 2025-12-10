@@ -1,12 +1,31 @@
-import { useCallback, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { UploadFile } from "@/types/document";
+import { AnimatePresence, motion } from "framer-motion";
+import { FileText, Upload } from "lucide-react";
+import { useCallback, useState } from "react";
 
 interface FileDropzoneProps {
   onFilesAdded: (files: File[]) => void;
   disabled?: boolean;
+}
+
+const ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/tiff",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
+const ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".docx", ".xlsx"];
+
+function isAllowedFile(file: File): boolean {
+  if (ALLOWED_MIME_TYPES.has(file.type)) {
+    return true;
+  }
+
+  const extension = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(extension);
 }
 
 export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
@@ -27,15 +46,14 @@ export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
     setIsDragOver(false);
     if (disabled) return;
 
-    const files = Array.from(e.dataTransfer.files).filter(
-      (file) => file.type === "application/pdf"
-    );
+    const files = Array.from(e.dataTransfer.files).filter(isAllowedFile);
     if (files.length > 0) onFilesAdded(files);
   }, [onFilesAdded, disabled]);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
-    if (files.length > 0) onFilesAdded(files);
+    const allowed = files.filter(isAllowedFile);
+    if (allowed.length > 0) onFilesAdded(allowed);
     e.target.value = "";
   }, [onFilesAdded]);
 
@@ -69,7 +87,7 @@ export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
 
       <input
         type="file"
-        accept=".pdf,application/pdf"
+        accept={ALLOWED_EXTENSIONS.join(",")}
         multiple
         onChange={handleFileInput}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -95,7 +113,7 @@ export function FileDropzone({ onFilesAdded, disabled }: FileDropzoneProps) {
       </p>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileText className="w-4 h-4" />
-        <span>PDF files only, up to 50MB each</span>
+        <span>PDF, image, DOCX, or XLSX up to 50MB each</span>
       </div>
     </motion.div>
   );

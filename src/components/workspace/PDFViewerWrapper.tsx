@@ -1,18 +1,19 @@
-import { useState, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
-import { ZoomIn, ZoomOut, RotateCw, Maximize2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { BoundingBox } from "@/types/document";
+import { motion } from "framer-motion";
+import { Maximize2, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { HighlightOverlay } from "./HighlightOverlay";
 
 interface PDFViewerWrapperProps {
   documentId: string;
+  fileName?: string;
   highlights?: BoundingBox[];
   activeHighlight?: BoundingBox | null;
 }
 
 export function PDFViewerWrapper({
   documentId,
+  fileName,
   highlights = [],
   activeHighlight,
 }: PDFViewerWrapperProps) {
@@ -20,6 +21,11 @@ export function PDFViewerWrapper({
   const [currentPage, setCurrentPage] = useState(1);
   const totalPages = 5; // Mock value
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setZoom(100);
+    setCurrentPage(1);
+  }, [documentId]);
 
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 25, 200));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 25, 50));
@@ -78,12 +84,14 @@ export function PDFViewerWrapper({
           {/* Mock PDF Content */}
           <div className="absolute inset-0 p-8 text-gray-800 text-sm leading-relaxed">
             <div className="space-y-4">
-              <h1 className="text-xl font-bold text-gray-900">Sample Document</h1>
+              <h1 className="text-xl font-bold text-gray-900">
+                {fileName || "Uploaded Document"}
+              </h1>
               <div className="h-px bg-gray-200" />
-              <p className="text-gray-600">
-                This is a preview of your uploaded PDF document. The actual PDF.js
-                integration will render the real document content here.
-              </p>
+                <p className="text-gray-600">
+                  This is a placeholder preview. Once PDF rendering is enabled, the actual
+                  document will appear here together with highlights returned from the backend.
+                </p>
               <div className="grid grid-cols-2 gap-4 mt-6">
                 <div className="p-3 bg-gray-50 rounded-lg">
                   <span className="text-xs text-gray-500">Invoice Number</span>
