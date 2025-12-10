@@ -75,14 +75,29 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
             headers={"unstract-key": LLMWHISPERER_API_KEY},
         )
 
+        # Try to get highlight data from separate endpoint
+        highlight_data = await get_highlight_data(
+            client=client,
+            whisper_hash=whisper_hash,
+            headers={"unstract-key": LLMWHISPERER_API_KEY},
+        )
+
     # Try multiple paths to find result_text (API structure varies)
     result_text = _extract_result_text(extraction)
+    
+    # Extract bounding boxes: prefer highlight_data, fallback to extraction result
+    bounding_boxes = None
+    if highlight_data:
+        bounding_boxes = highlight_data.get("bounding_boxes") or highlight_data.get("line_metadata")
+    
+    if not bounding_boxes:
+        bounding_boxes = _extract_nested(extraction, "line_metadata")
     
     return {
         "file_name": upload_file.filename or "unknown",
         "result_text": result_text,
         "whisper_hash": whisper_hash,
-        "bounding_boxes": _extract_nested(extraction, "line_metadata"),
+        "bounding_boxes": bounding_boxes,
         "pages": _extract_nested(extraction, "pages"),
     }
 
@@ -216,3 +231,36 @@ async def _retrieve_result(
     result = retrieve_response.json()
     logger.info(f"LLMWhisperer retrieve response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
     return result
+
+
+async def get_highlight_data(
+    client: httpx.AsyncClient,
+    whisper_hash: str,
+    headers: Dict[str, str],
+) -> Dict[str, Any]:
+    """
+    Fetch highlight/bounding box data for a processed document.
+    This may be a separate endpoint or included in the extraction result.
+    """
+    try:
+        # Try dedicated highlight endpoint first
+        highlight_response = await client.get(
+            f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-highlight",
+            params={"whisper_hash": whisper_hash},
+            headers=headers,
+            timeout=httpx.Timeout(30.0),
+        )
+        if highlight_response.status_code == 200:
+            return highlight_response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            # Endpoint doesn't exist, will use extraction result instead
+            logger.debug("Highlight endpoint not available, using extraction result")
+        else:
+            logger.warning(f"Highlight endpoint returned error: {exc.response.text}")
+    except httpx.HTTPError:
+        # Network error, will use extraction result instead
+        logger.debug("Failed to reach highlight endpoint, using extraction result")
+    
+    # Fallback: return empty dict, caller should use extraction result
+    return {}
