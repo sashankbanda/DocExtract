@@ -1,21 +1,16 @@
+import { StructuredFieldData } from "@/types/document";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Table } from "lucide-react";
 
-interface StructuredField {
-  key: string;
-  value: string;
-  word_indexes: number[];
-}
-
 interface StructuredTablePanelProps {
-  fields?: StructuredField[];
+  structuredFields?: Record<string, StructuredFieldData>;
   onFieldClick?: (wordIndexes: number[]) => void;
   onFieldHover?: (wordIndexes: number[] | null) => void;
 }
 
 export function StructuredTablePanel({
-  fields = [],
+  structuredFields,
   onFieldClick,
   onFieldHover,
 }: StructuredTablePanelProps) {
@@ -31,12 +26,23 @@ export function StructuredTablePanel({
     }
   };
 
+  // Convert structuredFields object to array of entries
+  const fields = structuredFields
+    ? Object.entries(structuredFields)
+        .map(([key, data]) => ({
+          key,
+          value: data.value || "",
+          word_indexes: data.word_indexes || [],
+        }))
+        .filter((field) => field.value !== null && field.value !== "")
+    : [];
+
   if (fields.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
         <Table className="w-8 h-8 mb-2 opacity-50" />
         <p className="text-sm">No structured fields extracted yet</p>
-        <p className="text-xs mt-1">Use the extract fields API to get structured data</p>
+        <p className="text-xs mt-1">Fields will appear here after extraction</p>
       </div>
     );
   }
@@ -78,7 +84,7 @@ export function StructuredTablePanel({
                 transition={{ delay: index * 0.05 }}
                 className={cn(
                   "border-t border-border/30 transition-colors",
-                  "hover:bg-primary/10 cursor-pointer"
+                  field.word_indexes.length > 0 && "hover:bg-primary/10 cursor-pointer"
                 )}
                 onMouseEnter={() => handleRowHover(field.word_indexes)}
                 onMouseLeave={() => handleRowHover(null)}

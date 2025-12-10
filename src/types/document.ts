@@ -1,3 +1,10 @@
+export interface StructuredFieldData {
+  value: string | null;
+  start: number | null;
+  end: number | null;
+  word_indexes: number[];
+}
+
 export interface UploadFile {
   id: string;
   name: string;
@@ -13,6 +20,7 @@ export interface UploadFile {
     boundingBoxes?: Record<string, unknown> | null;
     pages?: unknown[] | null;
   };
+  structuredFields?: Record<string, StructuredFieldData>;
 }
 
 export interface BoundingBox {
@@ -66,4 +74,5 @@ export interface UploadedDocumentResult {
   whisperHash: string;
   boundingBoxes?: Record<string, unknown> | null;
   pages?: unknown[] | null;
+  structuredFields?: Record<string, StructuredFieldData>;
 }

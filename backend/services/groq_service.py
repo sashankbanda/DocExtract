@@ -1,85 +1,123 @@
 import json
+import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import httpx
 from fastapi import HTTPException, status
 
+logger = logging.getLogger(__name__)
 
 GROQ_API_BASE_URL = os.getenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
 
 
-async def perform_template_extraction(
-    *, full_text: str, word_list: List[Dict[str, Any]], template_json: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    if not GROQ_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="GROQ_API_KEY is not configured.",
-        )
+class GroqService:
+    """Service for interacting with Groq API for LLM-based field extraction."""
 
-    input_payload = {
-        "model": GROQ_MODEL,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise information extraction assistant. "
-                    "Extract the requested fields and return ONLY valid JSON."
-                ),
-            },
-            {
-                "role": "user",
-                "content": _build_prompt(full_text, word_list, template_json),
-            },
-        ],
-    }
+    def __init__(self):
+        """Initialize GroqService with API key and model configuration."""
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY is not configured.")
+        self.api_key = GROQ_API_KEY
+        self.api_base_url = GROQ_API_BASE_URL.rstrip("/")
+        self.model = GROQ_MODEL
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    async def extract(self, prompt: str) -> str:
+        """
+        Send a prompt to Groq API and return the raw text response.
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        Args:
+            prompt: The prompt text to send to the LLM
+
+        Returns:
+            Raw text response from the LLM
+
+        Raises:
+            HTTPException: If the API request fails
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": self.model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a precise information extraction assistant. "
+                        "Extract the requested fields and return ONLY valid JSON. "
+                        "No explanations, no prose, only JSON."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            try:
+                response = await client.post(
+                    f"{self.api_base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                error_msg = f"Groq API request failed: {exc.response.text}"
+                logger.error(error_msg)
+                raise HTTPException(
+                    status_code=exc.response.status_code,
+                    detail=error_msg,
+                ) from exc
+            except httpx.HTTPError as exc:
+                error_msg = f"Failed to reach Groq API: {exc}"
+                logger.error(error_msg)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=error_msg,
+                ) from exc
+
         try:
-            response = await client.post(
-                f"{GROQ_API_BASE_URL.rstrip('/')}/chat/completions",
-                headers=headers,
-                json=input_payload,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(
-                status_code=exc.response.status_code,
-                detail=f"Groq extraction failed: {exc.response.text}",
-            ) from exc
-        except httpx.HTTPError as exc:
+            response_data = response.json()
+            content = response_data["choices"][0]["message"]["content"]
+            return content.strip()
+        except (KeyError, IndexError) as exc:
+            error_msg = "Unexpected Groq response structure."
+            logger.error(f"{error_msg} Response: {response_data}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to reach Groq API: {exc}",
+                detail=error_msg,
             ) from exc
 
-    response_payload = response.json()
-    try:
-        content = response_payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unexpected Groq response structure.",
-        ) from exc
 
+# Legacy function for backward compatibility
+async def perform_template_extraction(
+    *, full_text: str, word_list: list[Dict[str, Any]], template_json: Dict[str, Any]
+) -> list[Dict[str, Any]]:
+    """
+    Legacy function for template extraction.
+    Kept for backward compatibility.
+    """
+    service = GroqService()
+    prompt = _build_prompt(full_text, word_list, template_json)
+    content = await service.extract(prompt)
     parsed = _parse_structured_output(content)
     _validate_extracted_fields(parsed)
     return parsed
 
 
 def _build_prompt(
-    full_text: str, word_list: List[Dict[str, Any]], template_json: Dict[str, Any]
+    full_text: str, word_list: list[Dict[str, Any]], template_json: Dict[str, Any]
 ) -> str:
+    """Build prompt for legacy extraction function."""
     template_block = json.dumps(template_json, ensure_ascii=False, indent=2)
     words_block = json.dumps(word_list, ensure_ascii=False)
     prompt_parts = [
@@ -94,7 +132,8 @@ def _build_prompt(
     return "\n".join(prompt_parts)
 
 
-def _parse_structured_output(content: str) -> List[Dict[str, Any]]:
+def _parse_structured_output(content: str) -> list[Dict[str, Any]]:
+    """Parse structured output from legacy function."""
     cleaned = content.strip()
     if cleaned.startswith("```"):
         segments = cleaned.split("```")
@@ -119,7 +158,8 @@ def _parse_structured_output(content: str) -> List[Dict[str, Any]]:
     return data
 
 
-def _validate_extracted_fields(data: List[Dict[str, Any]]) -> None:
+def _validate_extracted_fields(data: list[Dict[str, Any]]) -> None:
+    """Validate extracted fields from legacy function."""
     for item in data:
         if not isinstance(item, dict):
             raise ValueError("Each extracted field must be a JSON object.")

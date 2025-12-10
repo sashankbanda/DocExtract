@@ -25,7 +25,7 @@ const tabs: { id: TabType; label: string; icon: typeof FileText }[] = [
 
 export default function Workspace() {
   const navigate = useNavigate();
-  const { documents } = useExtractionContext();
+  const { documents, selectedFile, setSelectedFile } = useExtractionContext();
   const [selectedFileId, setSelectedFileId] = useState<string>(documents[0]?.id ?? "");
   const [activeTab, setActiveTab] = useState<TabType>("text");
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
@@ -38,16 +38,22 @@ export default function Workspace() {
       return;
     }
     if (!selectedFileId || !documents.some((doc) => doc.id === selectedFileId)) {
-      setSelectedFileId(documents[0].id);
+      const firstDoc = documents[0];
+      if (firstDoc) {
+        setSelectedFileId(firstDoc.id);
+        setSelectedFile(firstDoc);
+      }
+    } else {
+      const doc = documents.find((d) => d.id === selectedFileId);
+      if (doc) {
+        setSelectedFile(doc);
+      }
     }
-  }, [documents, selectedFileId]);
+  }, [documents, selectedFileId, setSelectedFile]);
 
   const selectedDocument = useMemo<UploadedDocumentResult | null>(() => {
-    if (!documents.length) {
-      return null;
-    }
-    return documents.find((doc) => doc.id === selectedFileId) ?? documents[0];
-  }, [documents, selectedFileId]);
+    return selectedFile || documents.find((doc) => doc.id === selectedFileId) || documents[0] || null;
+  }, [documents, selectedFileId, selectedFile]);
 
 
   // Handle word index highlighting (new API)
@@ -111,21 +117,17 @@ export default function Workspace() {
           <EmptyState message="No text was returned for this document." />
         );
       case "tables":
-        // TODO: Get structured fields from API or context
-        // For now, using empty array - will be populated when extract-fields API is called
         return (
           <StructuredTablePanel
-            fields={[]}
+            structuredFields={selectedDocument?.structuredFields}
             onFieldClick={handleWordIndexClick}
             onFieldHover={handleWordIndexHover}
           />
         );
       case "fields":
-        // TODO: Get template fields from API or context
-        // For now, using empty array - will be populated when extract-fields API is called
         return (
           <TemplateFieldsPanel
-            fields={[]}
+            structuredFields={selectedDocument?.structuredFields}
             onFieldClick={handleWordIndexClick}
             onFieldHover={handleWordIndexHover}
           />
@@ -155,7 +157,13 @@ export default function Workspace() {
               <FileSelectorDropdown
                 files={documents.map((doc) => ({ id: doc.id, name: doc.fileName }))}
                 selectedId={selectedDocument?.id ?? ""}
-                onSelect={setSelectedFileId}
+                onSelect={(id) => {
+                  setSelectedFileId(id);
+                  const doc = documents.find((d) => d.id === id);
+                  if (doc) {
+                    setSelectedFile(doc);
+                  }
+                }}
               />
             </div>
 

@@ -4,10 +4,10 @@ import { toast } from "@/components/ui/use-toast";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { FileListItem } from "@/components/upload/FileListItem";
 import { useExtractionContext } from "@/context/ExtractionContext";
-import { uploadSingleDocument } from "@/lib/api";
+import { extractFields, uploadSingleDocument } from "@/lib/api";
 import { UploadFile, UploadedDocumentResult } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, FileText, Upload } from "lucide-react";
+import { ArrowRight, FileText, Loader2, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -83,7 +83,7 @@ export default function UploadPage() {
             f.id === fileId
               ? {
                   ...f,
-                  status: "complete",
+                  status: "processing",
                   progress: 100,
                   whisperHash: result.whisperHash,
                   extraction: {
@@ -96,7 +96,70 @@ export default function UploadPage() {
           )
         );
 
-        uploadedResults.push(result);
+        // Extract structured fields if we have text and bounding boxes
+        let structuredFields: Record<string, { value: string | null; start: number | null; end: number | null; word_indexes: number[] }> = {};
+        
+        if (result.text && result.boundingBoxes) {
+          try {
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId ? { ...f, status: "processing" } : f
+              )
+            );
+
+            const structured = await extractFields({
+              text: result.text,
+              boundingBoxes: result.boundingBoxes,
+              templateName: "standard_template",
+            });
+
+            structuredFields = structured.fields;
+
+            // Update file with structured fields
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId
+                  ? {
+                      ...f,
+                      status: "complete",
+                      structuredFields: structuredFields,
+                    }
+                  : f
+              )
+            );
+          } catch (error) {
+            // If structured extraction fails, continue with empty structuredFields
+            const errorMessage = error instanceof Error ? error.message : "Structured extraction failed";
+            console.warn(`Failed to extract structured fields for ${result.fileName}:`, errorMessage);
+            
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.id === fileId
+                  ? {
+                      ...f,
+                      status: "complete",
+                      structuredFields: {},
+                    }
+                  : f
+              )
+            );
+          }
+        } else {
+          // Mark as complete if no text/bounding boxes
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileId ? { ...f, status: "complete" } : f
+            )
+          );
+        }
+
+        // Create enriched result with structured fields
+        const enrichedResult: UploadedDocumentResult = {
+          ...result,
+          structuredFields,
+        };
+
+        uploadedResults.push(enrichedResult);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Upload failed.";
         setFiles((prev) =>
@@ -122,18 +185,8 @@ export default function UploadPage() {
         description: `${uploadedResults.length} file${uploadedResults.length === 1 ? "" : "s"} processed successfully.`,
       });
 
-      // Navigate to workspace with uploaded files data
-      navigate("/workspace", {
-        state: {
-          uploadedFiles: uploadedResults.map((result) => ({
-            name: result.fileName,
-            text: result.text,
-            whisperHash: result.whisperHash,
-            boundingBoxes: result.boundingBoxes,
-            pages: result.pages,
-          })),
-        },
-      });
+      // Navigate to workspace - documents are already in context
+      navigate("/workspace");
     } else {
       toast({
         title: "Upload failed",

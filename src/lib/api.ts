@@ -1,4 +1,4 @@
-import { UploadedDocumentResult } from "@/types/document";
+import { StructuredFieldData, UploadedDocumentResult } from "@/types/document";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8004";
 
@@ -123,4 +123,40 @@ export async function uploadSingleDocument(
     xhr.open("POST", buildUrl("/upload"));
     xhr.send(formData);
   });
+}
+
+export interface ExtractFieldsPayload {
+  text: string;
+  boundingBoxes: Record<string, unknown>;
+  templateName?: string;
+}
+
+export interface ExtractFieldsResponse {
+  fields: Record<string, StructuredFieldData>;
+}
+
+export async function extractFields(
+  payload: ExtractFieldsPayload
+): Promise<ExtractFieldsResponse> {
+  const response = await fetch(buildUrl("/extract-fields"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text: payload.text,
+      boundingBoxes: payload.boundingBoxes,
+      templateName: payload.templateName || "standard_template",
+    }),
+  });
+
+  const data = await handleResponse(response);
+  
+  if (!data || typeof data !== "object" || !data.fields) {
+    throw new Error("Unexpected extract fields response format.");
+  }
+
+  return {
+    fields: data.fields,
+  };
 }
