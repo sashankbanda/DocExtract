@@ -1,6 +1,6 @@
 import { ExtractedTextPanel } from "@/components/workspace/ExtractedTextPanel";
 import { FileSelectorDropdown } from "@/components/workspace/FileSelectorDropdown";
-import { PDFViewerWrapper } from "@/components/workspace/PDFViewerWrapper";
+import { PDFViewerRef, PDFViewerWrapper } from "@/components/workspace/PDFViewerWrapper";
 import { StructuredTablePanel } from "@/components/workspace/StructuredTablePanel";
 import { TemplateFieldsPanel } from "@/components/workspace/TemplateFieldsPanel";
 import { TwoPaneLayout } from "@/components/workspace/TwoPaneLayout";
@@ -11,8 +11,8 @@ import {
     UploadedDocumentResult,
 } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileText, Table, Tag, Upload } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FileText, Loader2, Table, Tag, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 type TabType = "text" | "tables" | "fields";
@@ -32,7 +32,10 @@ export default function Workspace() {
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
   const [selectedWordIndexes, setSelectedWordIndexes] = useState<number[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
+  const [isSwitchingFile, setIsSwitchingFile] = useState(false);
+  const pdfViewerRef = useRef<PDFViewerRef>(null);
 
+  // Reset highlights and scroll when file changes
   useEffect(() => {
     if (!documents.length) {
       return;
@@ -45,11 +48,22 @@ export default function Workspace() {
       }
     } else {
       const doc = documents.find((d) => d.id === selectedFileId);
-      if (doc) {
+      if (doc && doc.id !== selectedFile?.id) {
+        setIsSwitchingFile(true);
         setSelectedFile(doc);
+        // Reset highlights
+        setSelectedWordIndexes([]);
+        setActiveHighlightId(null);
+        setHoveredBoundingBox(null);
+        setActiveBoundingBox(null);
+        // Reset scroll position
+        setTimeout(() => {
+          pdfViewerRef.current?.scrollToPage(1);
+          setIsSwitchingFile(false);
+        }, 100);
       }
     }
-  }, [documents, selectedFileId, setSelectedFile]);
+  }, [documents, selectedFileId, setSelectedFile, selectedFile]);
 
   const selectedDocument = useMemo<UploadedDocumentResult | null>(() => {
     return selectedFile || documents.find((doc) => doc.id === selectedFileId) || documents[0] || null;
@@ -64,7 +78,13 @@ export default function Workspace() {
   const handleWordIndexClick = useCallback((wordIndexes: number[]) => {
     setSelectedWordIndexes(wordIndexes);
     setActiveHighlightId(`highlight-${Date.now()}`);
-    setTimeout(() => setActiveHighlightId(null), 1000);
+    
+    // Scroll to highlight
+    if (pdfViewerRef.current && wordIndexes.length > 0) {
+      pdfViewerRef.current.scrollToHighlight(wordIndexes);
+    }
+    
+    setTimeout(() => setActiveHighlightId(null), 2000);
   }, []);
 
   // Legacy bounding box handlers (for backward compatibility)
@@ -78,6 +98,32 @@ export default function Workspace() {
   }, []);
 
   const allHighlights = hoveredBoundingBox ? [hoveredBoundingBox] : [];
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts when not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "1") {
+          e.preventDefault();
+          setActiveTab("text");
+        } else if (e.key === "2") {
+          e.preventDefault();
+          setActiveTab("tables");
+        } else if (e.key === "3") {
+          e.preventDefault();
+          setActiveTab("fields");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   if (!documents.length) {
     return (
@@ -112,6 +158,7 @@ export default function Workspace() {
             document={selectedDocument}
             onLineClick={handleWordIndexClick}
             onLineHover={handleWordIndexHover}
+            isLoading={isSwitchingFile}
           />
         ) : (
           <EmptyState message="No text was returned for this document." />
@@ -122,6 +169,7 @@ export default function Workspace() {
             structuredFields={selectedDocument?.structuredFields}
             onFieldClick={handleWordIndexClick}
             onFieldHover={handleWordIndexHover}
+            isLoading={isSwitchingFile}
           />
         );
       case "fields":
@@ -130,6 +178,7 @@ export default function Workspace() {
             structuredFields={selectedDocument?.structuredFields}
             onFieldClick={handleWordIndexClick}
             onFieldHover={handleWordIndexHover}
+            isLoading={isSwitchingFile}
           />
         );
       default:
@@ -138,10 +187,28 @@ export default function Workspace() {
   };
 
   return (
-    <div className="min-h-screen pt-16">
+    <div className="min-h-screen pt-16 relative">
+      {/* Loading overlay when switching files */}
+      <AnimatePresence>
+        {isSwitchingFile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          >
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Loading document...</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <TwoPaneLayout
         leftPane={
           <PDFViewerWrapper
+            ref={pdfViewerRef}
             documentId={selectedDocument?.id ?? ""}
             fileName={selectedDocument?.fileName}
             boundingBoxes={selectedDocument?.boundingBoxes}

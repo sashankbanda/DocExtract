@@ -1,10 +1,10 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from services.mapping_service import _load_template, extract_fields_from_text
+from services.mapping_service import _load_template, extract_fields_from_text, normalize_bounding_boxes
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,11 @@ class ExtractFieldsRequest(BaseModel):
     """Request model for field extraction."""
 
     text: str = Field(..., description="Layout-preserving text from LLMWhisperer")
-    boundingBoxes: Dict[str, Any] = Field(..., description="Bounding box metadata from LLMWhisperer")
-    templateName: Optional[str] = Field(
+    boundingBoxes: Optional[Union[Dict[str, Any], List[Any]]] = Field(
+        default=None,
+        description="Bounding box metadata from LLMWhisperer (dict or list)",
+    )
+    templateName: str = Field(
         default="standard_template",
         description="Name of the template to use (without .json extension)",
     )
@@ -71,11 +74,15 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         logger.info(f"Loading template: {template_name}")
         template = _load_template(template_name)
 
+        # Normalize bounding boxes (convert list to dict, handle None)
+        normalized_boxes = normalize_bounding_boxes(request.boundingBoxes)
+        logger.info(f"Normalized bounding boxes: type={type(normalized_boxes).__name__}, keys={len(normalized_boxes) if isinstance(normalized_boxes, dict) else 'N/A'}")
+
         # Extract fields using mapping service
         logger.info(f"Extracting fields from text (length: {len(request.text)})")
         result = await extract_fields_from_text(
             text=request.text,
-            bounding_boxes=request.boundingBoxes,
+            bounding_boxes=normalized_boxes,
             template=template,
         )
 

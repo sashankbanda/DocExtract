@@ -5,7 +5,7 @@ import { useCallback, useMemo, useEffect, useRef, useState } from "react";
 interface HighlightOverlayProps {
   // New API: word index-based highlighting
   boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend
-  selectedIndexes?: number[]; // Word indexes to highlight
+  selectedIndexes?: number[]; // Word indexes to highlight (preview/hover)
   pdfPageRefs?: React.RefObject<HTMLCanvasElement>[]; // Array of page canvas refs
   currentScale?: number; // Current zoom scale
   pageMetadata?: Array<{
@@ -15,9 +15,10 @@ interface HighlightOverlayProps {
     viewport: { width: number; height: number };
     scale: number;
   }>; // Page metadata for positioning
-  activeHighlightId?: string | null; // ID of the active highlight
+  activeHighlightId?: string | null; // ID of the active highlight (clicked)
   onHighlightClick?: (highlight: MergedHighlight) => void; // Callback when highlight is clicked
   scrollContainerRef?: React.RefObject<HTMLDivElement>; // Container ref for scrolling
+  pagesLoaded?: boolean; // Whether PDF pages are fully loaded
   // Legacy API: direct bounding box highlighting (backward compatibility)
   highlights?: BoundingBox[]; // Pre-positioned highlights
   activeHighlight?: BoundingBox | null; // Active highlight
@@ -204,6 +205,7 @@ export function HighlightOverlay({
   activeHighlightId = null,
   onHighlightClick,
   scrollContainerRef,
+  pagesLoaded = true,
   // Legacy API
   highlights,
   activeHighlight,
@@ -211,6 +213,7 @@ export function HighlightOverlay({
 }: HighlightOverlayProps) {
   const glowTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [clickedHighlightId, setClickedHighlightId] = useState<string | null>(null);
+  const [pulseHighlightId, setPulseHighlightId] = useState<string | null>(null);
 
   // Determine which API to use
   const useNewAPI = boundingBoxes !== undefined && selectedIndexes.length > 0;
@@ -291,11 +294,17 @@ export function HighlightOverlay({
 
       // Set clicked highlight for glow effect
       setClickedHighlightId(highlight.id);
+      setPulseHighlightId(highlight.id);
 
-      // Clear glow after 1 second
+      // Clear pulse after 1 second, glow stays longer
+      setTimeout(() => {
+        setPulseHighlightId(null);
+      }, 1000);
+
+      // Clear glow after 2 seconds
       glowTimeoutRef.current = setTimeout(() => {
         setClickedHighlightId(null);
-      }, 1000);
+      }, 2000);
 
       // Scroll to page if using new API
       if (useNewAPI && scrollContainerRef?.current && pageMetadata.length) {
@@ -304,7 +313,7 @@ export function HighlightOverlay({
 
         // Scroll to the highlight
         const container = scrollContainerRef.current;
-        const scrollY = pageOffset - 100; // 100px offset from top
+        const scrollY = pageOffset + highlight.y - 150; // 150px offset from top
         container.scrollTo({
           top: Math.max(0, scrollY),
           behavior: "smooth",
@@ -348,15 +357,57 @@ export function HighlightOverlay({
     };
   }, []);
 
+  // Don't render if pages aren't loaded
+  if (!pagesLoaded) {
+    return null;
+  }
+
+  // Separate preview (hover) and active (clicked) highlights
+  const previewHighlights = useMemo(() => {
+    // Preview highlights are from selectedIndexes (hover state)
+    if (!useNewAPI || !boundingBoxes || selectedIndexes.length === 0) return [];
+    
+    const lookup = buildIndexLookup(boundingBoxes);
+    const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
+    const uniqueIndexes = Array.from(new Set(selectedIndexes));
+    
+    uniqueIndexes.forEach((index) => {
+      const box = lookup.get(index);
+      if (box) {
+        boxes.push(box);
+      }
+    });
+    
+    const merged = mergeBoxes(boxes);
+    return merged.map((highlight) => {
+      const pageIndex = highlight.page - 1;
+      const pageOffset = pageOffsets[pageIndex] || 0;
+      return {
+        ...highlight,
+        x: highlight.x * currentScale,
+        y: highlight.y * currentScale + pageOffset,
+        width: highlight.width * currentScale,
+        height: highlight.height * currentScale,
+      };
+    });
+  }, [useNewAPI, boundingBoxes, selectedIndexes, currentScale, pageOffsets]);
+
+  const activeHighlights = useMemo(() => {
+    // Active highlights are from activeHighlightId (clicked state)
+    if (effectiveActiveHighlightId) {
+      return positionedHighlights.filter((h) => h.id === effectiveActiveHighlightId);
+    }
+    return [];
+  }, [positionedHighlights, effectiveActiveHighlightId]);
+
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      {/* Passive highlights */}
-      {positionedHighlights.map((highlight) => {
-        const isActive = effectiveActiveHighlightId === highlight.id;
-        return (
+      {/* Preview layer (hover highlights) - subtle */}
+      <AnimatePresence>
+        {previewHighlights.map((highlight) => (
           <motion.div
-            key={highlight.id}
-            className="absolute bg-blue-500/20 border border-blue-400/50 rounded-sm pointer-events-auto cursor-pointer"
+            key={`preview-${highlight.id}`}
+            className="absolute bg-blue-500/15 border border-blue-400/30 rounded-md pointer-events-none"
             style={{
               left: highlight.x,
               top: highlight.y,
@@ -365,18 +416,63 @@ export function HighlightOverlay({
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* Active layer (clicked highlights) - prominent with glow */}
+      {positionedHighlights.map((highlight) => {
+        const isActive = effectiveActiveHighlightId === highlight.id;
+        const isPulsing = pulseHighlightId === highlight.id;
+
+        return (
+          <motion.div
+            key={highlight.id}
+            className="absolute bg-blue-500/25 border border-blue-400/60 rounded-md pointer-events-auto cursor-pointer"
+            style={{
+              left: highlight.x,
+              top: highlight.y,
+              width: highlight.width,
+              height: highlight.height,
+            }}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ 
+              opacity: 1, 
+              scale: 1,
+            }}
             transition={{ duration: 0.3 }}
             onClick={() => handleHighlightClick(highlight)}
-            whileHover={{ opacity: 0.8 }}
+            whileHover={{ opacity: 0.9 }}
           >
+            {/* Pulse animation for clicked highlight */}
+            <AnimatePresence>
+              {isPulsing && (
+                <motion.div
+                  className="absolute -inset-1 bg-blue-500/40 rounded-lg pointer-events-none"
+                  initial={{ opacity: 0, scale: 1 }}
+                  animate={{ 
+                    opacity: [0, 0.6, 0],
+                    scale: [1, 1.05, 1],
+                  }}
+                  exit={{ opacity: 0 }}
+                  transition={{
+                    duration: 1,
+                    ease: "easeOut",
+                  }}
+                />
+              )}
+            </AnimatePresence>
+
             {/* Glow effect for active highlight */}
             <AnimatePresence>
               {isActive && (
                 <motion.div
-                  className="absolute -inset-2 bg-blue-500/30 rounded-md blur-md pointer-events-none"
+                  className="absolute -inset-2 bg-blue-500/30 rounded-lg blur-md pointer-events-none"
                   initial={{ opacity: 0 }}
                   animate={{
-                    opacity: [0.5, 0.8, 0.5],
+                    opacity: [0.4, 0.7, 0.4],
                   }}
                   exit={{ opacity: 0 }}
                   transition={{

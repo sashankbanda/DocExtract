@@ -1,7 +1,7 @@
 import { BoundingBox } from "@/types/document";
 import { motion } from "framer-motion";
 import { Loader2, Maximize2, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { HighlightOverlay } from "./HighlightOverlay";
 
@@ -29,7 +29,14 @@ interface PageMetadata {
   scale: number;
 }
 
-export function PDFViewerWrapper({
+export interface PDFViewerRef {
+  scrollToHighlight: (wordIndexes: number[]) => void;
+  scrollToPage: (pageNumber: number, wordIndex?: number) => void;
+  getPageForWordIndex: (wordIndex: number) => number | null;
+}
+
+export const PDFViewerWrapper = forwardRef<PDFViewerRef, PDFViewerWrapperProps>(
+function PDFViewerWrapper({
   documentId,
   fileName,
   pdfSource,
@@ -38,11 +45,13 @@ export function PDFViewerWrapper({
   activeHighlightId = null,
   highlights = [],
   activeHighlight,
-}: PDFViewerWrapperProps) {
+}, ref) {
   const [zoom, setZoom] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const [pagesLoaded, setPagesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pageMetadata, setPageMetadata] = useState<PageMetadata[]>([]);
   
@@ -52,6 +61,7 @@ export function PDFViewerWrapper({
   const renderTaskRef = useRef<Map<number, pdfjsLib.RenderTask>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
   const canvasRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
+  const wordIndexToPageMapRef = useRef<Map<number, number>>(new Map());
 
   // Load PDF document
   useEffect(() => {
@@ -109,6 +119,41 @@ export function PDFViewerWrapper({
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
         setZoom(100);
+        setPagesLoaded(false);
+
+        // Build word index to page mapping if bounding boxes are available
+        if (boundingBoxes) {
+          const wordIndexMap = new Map<number, number>();
+          const words = (boundingBoxes.words as unknown[]) || [];
+          const pages = (boundingBoxes.pages as unknown[]) || [];
+
+          words.forEach((word: unknown) => {
+            if (word && typeof word === "object" && "index" in word && "page" in word) {
+              const index = word.index as number;
+              const page = word.page as number;
+              if (typeof index === "number" && typeof page === "number") {
+                wordIndexMap.set(index, page);
+              }
+            }
+          });
+
+          pages.forEach((page: unknown) => {
+            if (page && typeof page === "object") {
+              const pageNum = ("page" in page ? page.page : "index" in page ? page.index : null) as number | null;
+              const pageWords = ("words" in page ? page.words : []) as unknown[];
+              pageWords.forEach((word: unknown) => {
+                if (word && typeof word === "object" && "index" in word && pageNum !== null) {
+                  const index = word.index as number;
+                  if (typeof index === "number") {
+                    wordIndexMap.set(index, pageNum);
+                  }
+                }
+              });
+            }
+          });
+
+          wordIndexToPageMapRef.current = wordIndexMap;
+        }
 
         // Initialize page metadata array
         const metadata: PageMetadata[] = [];
@@ -156,11 +201,14 @@ export function PDFViewerWrapper({
   // Render pages when zoom or document changes
   useEffect(() => {
     if (!pdfDocumentRef.current || totalPages === 0 || !pagesContainerRef.current) {
+      setPagesLoaded(false);
       return;
     }
 
     let isMounted = true;
     const scale = zoom / 100;
+    setIsRendering(true);
+    setPagesLoaded(false);
 
     const renderPages = async () => {
       // Cancel any ongoing render tasks
@@ -222,6 +270,8 @@ export function PDFViewerWrapper({
 
       if (isMounted) {
         setPageMetadata(updatedMetadata);
+        setPagesLoaded(true);
+        setIsRendering(false);
       }
     };
 
@@ -231,6 +281,8 @@ export function PDFViewerWrapper({
       isMounted = false;
       renderTaskRef.current.forEach((task) => task.cancel());
       renderTaskRef.current.clear();
+      setPagesLoaded(false);
+      setIsRendering(false);
     };
   }, [zoom, totalPages, documentId]);
 
@@ -244,6 +296,129 @@ export function PDFViewerWrapper({
 
   const handleZoomReset = useCallback(() => {
     setZoom(100);
+  }, []);
+
+  // Scroll to page function
+  const scrollToPage = useCallback((pageNumber: number, wordIndex?: number) => {
+    if (!containerRef.current || !pageMetadata.length || pageNumber < 1 || pageNumber > totalPages) {
+      return;
+    }
+
+    const pageIndex = pageNumber - 1;
+    const pageMeta = pageMetadata[pageIndex];
+    if (!pageMeta) return;
+
+    const offsets = getPageOffsets();
+    const pageOffset = offsets[pageIndex] || 0;
+
+    let scrollY = pageOffset - 100; // 100px offset from top
+
+    // If wordIndex is provided, try to scroll to that specific word
+    if (wordIndex !== undefined && boundingBoxes) {
+      const lookup = buildIndexLookup(boundingBoxes);
+      const wordBox = lookup.get(wordIndex);
+      if (wordBox && wordBox.page === pageNumber) {
+        const scale = zoom / 100;
+        const wordY = wordBox.y * scale;
+        scrollY = pageOffset + wordY - 150; // 150px offset to show word near top
+      }
+    }
+
+    containerRef.current.scrollTo({
+      top: Math.max(0, scrollY),
+      behavior: "smooth",
+    });
+  }, [pageMetadata, totalPages, zoom, boundingBoxes]);
+
+  // Scroll to highlight function
+  const scrollToHighlight = useCallback((wordIndexes: number[]) => {
+    if (!wordIndexes.length || !boundingBoxes || !containerRef.current || !pageMetadata.length) {
+      return;
+    }
+
+    // Find the page for the first word index
+    const firstIndex = wordIndexes[0];
+    const page = getPageForWordIndex(firstIndex);
+    if (!page) return;
+
+    scrollToPage(page, firstIndex);
+  }, [boundingBoxes, pageMetadata, scrollToPage]);
+
+  // Get page for word index
+  const getPageForWordIndex = useCallback((wordIndex: number): number | null => {
+    const page = wordIndexToPageMapRef.current.get(wordIndex);
+    return page || null;
+  }, []);
+
+  // Expose imperative API via ref
+  useImperativeHandle(ref, () => ({
+    scrollToHighlight,
+    scrollToPage,
+    getPageForWordIndex,
+  }), [scrollToHighlight, scrollToPage, getPageForWordIndex]);
+
+  // Helper function to build index lookup (duplicated from HighlightOverlay for internal use)
+  const buildIndexLookup = useCallback((bboxes: Record<string, unknown>): Map<number, BoundingBox> => {
+    const lookup = new Map<number, BoundingBox>();
+    if (!bboxes) return lookup;
+
+    const words = (bboxes.words as unknown[]) || [];
+    const pages = (bboxes.pages as unknown[]) || [];
+
+    words.forEach((word: unknown) => {
+      if (!word || typeof word !== "object") return;
+      const wordObj = word as Record<string, unknown>;
+      const index = wordObj.index;
+      if (typeof index !== "number") return;
+
+      const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
+      if (!bbox || typeof bbox !== "object") return;
+
+      const page = (wordObj.page || 1) as number;
+      const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
+      const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
+      const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
+      const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
+
+      lookup.set(index, {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        width: Math.abs(x2 - x1),
+        height: Math.abs(y2 - y1),
+        page: typeof page === "number" ? page : 1,
+      });
+    });
+
+    pages.forEach((page: unknown) => {
+      if (!page || typeof page !== "object") return;
+      const pageObj = page as Record<string, unknown>;
+      const pageNum = (pageObj.page ?? pageObj.index ?? 1) as number;
+      const pageWords = (pageObj.words || []) as unknown[];
+      pageWords.forEach((word: unknown) => {
+        if (!word || typeof word !== "object") return;
+        const wordObj = word as Record<string, unknown>;
+        const index = wordObj.index;
+        if (typeof index !== "number") return;
+
+        const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
+        if (!bbox || typeof bbox !== "object") return;
+
+        const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
+        const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
+        const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
+        const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
+
+        lookup.set(index, {
+          x: Math.min(x1, x2),
+          y: Math.min(y1, y2),
+          width: Math.abs(x2 - x1),
+          height: Math.abs(y2 - y1),
+          page: typeof pageNum === "number" ? pageNum : 1,
+        });
+      });
+    });
+
+    return lookup;
   }, []);
 
   // Calculate page offsets for highlight positioning
@@ -403,51 +578,64 @@ export function PDFViewerWrapper({
             </div>
           </div>
         ) : totalPages > 0 ? (
-          <motion.div
-            ref={pagesContainerRef}
-            className="relative"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-          >
-            {/* Pages are rendered as canvas elements */}
-            {/* Highlight Overlay - positioned absolutely over the pages */}
-            {pageMetadata.length > 0 && (
-              <div
-                className="absolute pointer-events-none"
-                style={{
-                  top: 0,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: pageMetadata[0]?.width || 0,
-                  height: pageMetadata.reduce((sum, meta) => sum + meta.height + 16, 0),
-                }}
-              >
-                {/* Use new API if boundingBoxes and selectedIndexes are provided */}
-                {boundingBoxes && selectedIndexes.length > 0 ? (
-                  <HighlightOverlay
-                    boundingBoxes={boundingBoxes}
-                    selectedIndexes={selectedIndexes}
-                    pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
-                      const canvas = canvasRefsRef.current.get(i + 1);
-                      return { current: canvas } as React.RefObject<HTMLCanvasElement>;
-                    })}
-                    currentScale={zoom / 100}
-                    pageMetadata={pageMetadata}
-                    activeHighlightId={activeHighlightId}
-                    scrollContainerRef={containerRef}
-                  />
-                ) : (
-                  /* Legacy API: use positioned highlights */
-                  <HighlightOverlay
-                    highlights={getPositionedHighlights()}
-                    activeHighlight={getPositionedActiveHighlight()}
-                    scale={1}
-                  />
-                )}
+          <>
+            {/* Loading skeleton while rendering */}
+            {isRendering && (
+              <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
+                <div className="text-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">Rendering pages...</p>
+                </div>
               </div>
             )}
-          </motion.div>
+            <motion.div
+              ref={pagesContainerRef}
+              className="relative"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: pagesLoaded ? 1 : 0.5 }}
+              transition={{ duration: 0.3 }}
+            >
+              {/* Pages are rendered as canvas elements */}
+              {/* Highlight Overlay - positioned absolutely over the pages */}
+              {pagesLoaded && pageMetadata.length > 0 && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{
+                    top: 0,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: pageMetadata[0]?.width || 0,
+                    height: pageMetadata.reduce((sum, meta) => sum + meta.height + 16, 0),
+                  }}
+                >
+                  {/* Use new API if boundingBoxes and selectedIndexes are provided */}
+                  {boundingBoxes && selectedIndexes.length > 0 ? (
+                    <HighlightOverlay
+                      boundingBoxes={boundingBoxes}
+                      selectedIndexes={selectedIndexes}
+                      pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
+                        const canvas = canvasRefsRef.current.get(i + 1);
+                        return { current: canvas } as React.RefObject<HTMLCanvasElement>;
+                      })}
+                      currentScale={zoom / 100}
+                      pageMetadata={pageMetadata}
+                      activeHighlightId={activeHighlightId}
+                      scrollContainerRef={containerRef}
+                      pagesLoaded={pagesLoaded}
+                    />
+                  ) : (
+                    /* Legacy API: use positioned highlights */
+                    <HighlightOverlay
+                      highlights={getPositionedHighlights()}
+                      activeHighlight={getPositionedActiveHighlight()}
+                      scale={1}
+                      pagesLoaded={pagesLoaded}
+                    />
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </>
         ) : (
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-muted-foreground">
@@ -461,4 +649,4 @@ export function PDFViewerWrapper({
       </div>
     </div>
   );
-}
+});

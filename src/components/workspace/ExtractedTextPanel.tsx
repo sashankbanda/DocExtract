@@ -8,6 +8,7 @@ interface ExtractedTextPanelProps {
   document?: UploadedDocumentResult | null;
   onLineClick?: (wordIndexes: number[]) => void;
   onLineHover?: (wordIndexes: number[] | null) => void;
+  isLoading?: boolean;
 }
 
 interface PageSection {
@@ -23,8 +24,12 @@ export function ExtractedTextPanel({
   document,
   onLineClick,
   onLineHover,
+  isLoading = false,
 }: ExtractedTextPanelProps) {
   const [expandedPages, setExpandedPages] = useState<Set<number>>(new Set([1]));
+  
+  // Determine loading state based on document availability
+  const isActuallyLoading = isLoading || !document || !document.text;
 
   // Parse text into pages and lines with word indexes
   const pageSections = useMemo<PageSection[]>(() => {
@@ -161,11 +166,35 @@ export function ExtractedTextPanel({
     }
   };
 
+  if (isActuallyLoading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="glass rounded-xl overflow-hidden"
+      >
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border/50">
+          <FileText className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-foreground">Extracted Text</span>
+        </div>
+        <div className="p-4 space-y-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <SkeletonLine key={i} />
+          ))}
+        </div>
+      </motion.div>
+    );
+  }
+
   if (!document || pageSections.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground"
+      >
         <p className="text-sm">No text content available</p>
-      </div>
+      </motion.div>
     );
   }
 

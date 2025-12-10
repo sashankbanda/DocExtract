@@ -127,7 +127,7 @@ export async function uploadSingleDocument(
 
 export interface ExtractFieldsPayload {
   text: string;
-  boundingBoxes: Record<string, unknown>;
+  boundingBoxes?: Record<string, unknown> | unknown[] | null;
   templateName?: string;
 }
 
@@ -145,7 +145,7 @@ export async function extractFields(
     },
     body: JSON.stringify({
       text: payload.text,
-      boundingBoxes: payload.boundingBoxes,
+      boundingBoxes: payload.boundingBoxes ?? {},
       templateName: payload.templateName || "standard_template",
     }),
   });

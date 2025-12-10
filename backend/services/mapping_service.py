@@ -42,6 +42,31 @@ def _load_template(template_name: str = "standard_template") -> Dict[str, Any]:
 STANDARD_TEMPLATE = _load_template("standard_template")
 
 
+def normalize_bounding_boxes(boxes: Dict[str, Any] | List[Any] | None) -> Dict[str, Any]:
+    """
+    Normalize bounding boxes to a consistent dictionary format.
+
+    Args:
+        boxes: Bounding boxes as dict, list, or None
+
+    Returns:
+        Normalized dictionary with string keys
+    """
+    if boxes is None:
+        return {}
+    
+    if isinstance(boxes, list):
+        # Convert list to dict with numeric string keys
+        return {str(i): box for i, box in enumerate(boxes)}
+    
+    if isinstance(boxes, dict):
+        return boxes
+    
+    # Fallback: return empty dict for unexpected types
+    logger.warning(f"Unexpected bounding boxes type: {type(boxes)}, returning empty dict")
+    return {}
+
+
 async def extract_fields_from_text(
     text: str, bounding_boxes: Dict[str, Any], template: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -69,6 +94,11 @@ async def extract_fields_from_text(
     if not text or not text.strip():
         logger.warning("Empty text provided for extraction")
         return {"fields": _create_empty_fields(template)}
+
+    # Handle empty or invalid bounding boxes gracefully
+    if not bounding_boxes or not isinstance(bounding_boxes, dict):
+        logger.warning("Invalid or empty bounding boxes provided, extraction will proceed without word indexes")
+        bounding_boxes = {}
 
     # Build LLM prompt
     prompt = _build_extraction_prompt(text, template)
@@ -102,8 +132,9 @@ async def extract_fields_from_text(
         value = field_data.get("value")
 
         # Generate word_indexes array from start/end
+        # Only populate if bounding_boxes are available and valid
         word_indexes = []
-        if start is not None and end is not None:
+        if bounding_boxes and start is not None and end is not None:
             # Ensure start <= end and both are integers
             try:
                 start_int = int(start)
