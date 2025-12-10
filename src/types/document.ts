@@ -13,6 +13,8 @@ export interface UploadFile {
   progress: number;
   status: 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
   file?: File;
+  rawFile?: File; // Original uploaded file
+  previewUrl?: string; // Blob URL created from rawFile
   error?: string;
   whisperHash?: string;
   extraction?: {
@@ -75,4 +77,5 @@ export interface UploadedDocumentResult {
   boundingBoxes?: Record<string, unknown> | null;
   pages?: unknown[] | null;
   structuredFields?: Record<string, StructuredFieldData>;
+  previewUrl?: string; // Blob URL for PDF rendering
 }

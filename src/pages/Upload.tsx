@@ -26,6 +26,8 @@ export default function UploadPage() {
       progress: 0,
       status: "pending" as const,
       file,
+      rawFile: file,
+      previewUrl: URL.createObjectURL(file),
     }));
     setFiles((prev) => [...prev, ...uploadFiles]);
   }, []);
@@ -36,6 +38,10 @@ export default function UploadPage() {
       // Prevent removing files that are currently uploading or processing
       if (file && (file.status === "uploading" || file.status === "processing")) {
         return prev;
+      }
+      // Clean up object URL to prevent memory leaks
+      if (file?.previewUrl) {
+        URL.revokeObjectURL(file.previewUrl);
       }
       return prev.filter((f) => f.id !== id);
     });
@@ -53,6 +59,7 @@ export default function UploadPage() {
       if (!uploadFile.file) continue;
 
       const fileId = uploadFile.id;
+      const previewUrl = uploadFile.previewUrl; // Store previewUrl before upload
 
       try {
         // Initialize upload state
@@ -153,10 +160,11 @@ export default function UploadPage() {
           );
         }
 
-        // Create enriched result with structured fields
+        // Create enriched result with structured fields and preview URL
         const enrichedResult: UploadedDocumentResult = {
           ...result,
           structuredFields,
+          previewUrl, // Use the previewUrl stored at the start of the loop
         };
 
         uploadedResults.push(enrichedResult);
@@ -208,6 +216,17 @@ export default function UploadPage() {
       setIsUploading(false);
     }
   }, [isProcessing]);
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      files.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
+    };
+  }, [files]);
 
   return (
     <div className="min-h-screen pt-24 pb-12 px-6">

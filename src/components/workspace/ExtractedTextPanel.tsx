@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { BoundingBox, LayoutText, UploadedDocumentResult } from "@/types/document";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronRight, FileText } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useRef, useState, useMemo } from "react";
 
 interface ExtractedTextPanelProps {
   document?: UploadedDocumentResult | null;
@@ -27,6 +27,7 @@ export function ExtractedTextPanel({
   isLoading = false,
 }: ExtractedTextPanelProps) {
   const [expandedPages, setExpandedPages] = useState<Set<number>>(new Set([1]));
+  const scrollContainerRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   
   // Determine loading state based on document availability
   const isActuallyLoading = isLoading || !document || !document.text;
@@ -154,9 +155,27 @@ export function ExtractedTextPanel({
     });
   };
 
-  const handleLineClick = (wordIndexes: number[]) => {
+  const handleLineClick = (wordIndexes: number[], pageNumber: number, lineElement?: HTMLElement) => {
     if (onLineClick && wordIndexes.length > 0) {
       onLineClick(wordIndexes);
+    }
+
+    // Scroll to the clicked line if it's off-screen
+    if (lineElement) {
+      const container = scrollContainerRefs.current.get(pageNumber);
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const lineRect = lineElement.getBoundingClientRect();
+        
+        // Check if line is outside the visible area
+        if (lineRect.left < containerRect.left || lineRect.right > containerRect.right) {
+          const scrollLeft = lineElement.offsetLeft - 100; // 100px offset from left
+          container.scrollTo({
+            left: Math.max(0, scrollLeft),
+            behavior: "smooth",
+          });
+        }
+      }
     }
   };
 
@@ -240,27 +259,54 @@ export function ExtractedTextPanel({
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
                 >
-                  <div className="px-4 pb-4 space-y-1">
-                    {section.lines.map((line, lineIndex) => (
-                      <motion.div
-                        key={lineIndex}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: lineIndex * 0.02 }}
-                        className={cn(
-                          "px-3 py-2 rounded-lg cursor-pointer transition-all duration-200",
-                          "hover:bg-primary/10 hover:border-l-2 hover:border-l-primary",
-                          line.wordIndexes.length > 0 && "border-l-2 border-l-transparent"
-                        )}
-                        onMouseEnter={() => handleLineHover(line.wordIndexes)}
-                        onMouseLeave={() => handleLineHover(null)}
-                        onClick={() => handleLineClick(line.wordIndexes)}
-                      >
-                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                          {line.text}
-                        </p>
-                      </motion.div>
-                    ))}
+                  <div
+                    ref={(el) => {
+                      if (el) {
+                        scrollContainerRefs.current.set(section.pageNumber, el);
+                      } else {
+                        scrollContainerRefs.current.delete(section.pageNumber);
+                      }
+                    }}
+                    className="w-full overflow-x-auto overflow-y-auto max-h-[600px]"
+                  >
+                    <pre
+                      className="whitespace-pre font-mono text-sm leading-relaxed text-foreground p-4 m-0"
+                      style={{
+                        whiteSpace: "pre",
+                        wordWrap: "normal",
+                        overflowWrap: "normal",
+                        wordBreak: "keep-all",
+                      }}
+                    >
+                      {section.lines.map((line, lineIndex) => {
+                        const hasWordIndexes = line.wordIndexes.length > 0;
+                        return (
+                          <span
+                            key={lineIndex}
+                            className={cn(
+                              "block cursor-pointer transition-all duration-200",
+                              "hover:bg-primary/10",
+                              hasWordIndexes && "hover:bg-primary/15"
+                            )}
+                            onMouseEnter={() => handleLineHover(line.wordIndexes)}
+                            onMouseLeave={() => handleLineHover(null)}
+                            onClick={(e) => {
+                              const target = e.currentTarget;
+                              handleLineClick(line.wordIndexes, section.pageNumber, target);
+                            }}
+                            style={{
+                              whiteSpace: "pre",
+                              wordWrap: "normal",
+                              overflowWrap: "normal",
+                              wordBreak: "keep-all",
+                            }}
+                          >
+                            {line.text}
+                            {"\n"}
+                          </span>
+                        );
+                      })}
+                    </pre>
                   </div>
                 </motion.div>
               )}

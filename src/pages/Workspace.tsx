@@ -15,6 +15,19 @@ import { FileText, Loader2, Table, Tag, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+// Cleanup object URLs when documents are removed
+function useObjectURLCleanup(documents: UploadedDocumentResult[]) {
+  useEffect(() => {
+    return () => {
+      documents.forEach((doc) => {
+        if (doc.previewUrl) {
+          URL.revokeObjectURL(doc.previewUrl);
+        }
+      });
+    };
+  }, [documents]);
+}
+
 type TabType = "text" | "tables" | "fields";
 
 const tabs: { id: TabType; label: string; icon: typeof FileText }[] = [
@@ -34,6 +47,9 @@ export default function Workspace() {
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const [isSwitchingFile, setIsSwitchingFile] = useState(false);
   const pdfViewerRef = useRef<PDFViewerRef>(null);
+
+  // Cleanup object URLs on unmount
+  useObjectURLCleanup(documents);
 
   // Reset highlights and scroll when file changes
   useEffect(() => {
@@ -211,6 +227,7 @@ export default function Workspace() {
             ref={pdfViewerRef}
             documentId={selectedDocument?.id ?? ""}
             fileName={selectedDocument?.fileName}
+            pdfSource={selectedDocument?.previewUrl}
             boundingBoxes={selectedDocument?.boundingBoxes}
             selectedIndexes={selectedWordIndexes}
             activeHighlightId={activeHighlightId}
