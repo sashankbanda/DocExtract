@@ -36,6 +36,70 @@ export interface PDFViewerRef {
   getPageForWordIndex: (wordIndex: number) => number | null;
 }
 
+// Helper function to build index lookup from bounding boxes
+function buildIndexLookup(bboxes: Record<string, unknown>): Map<number, BoundingBox> {
+  const lookup = new Map<number, BoundingBox>();
+  if (!bboxes) return lookup;
+
+  const words = (bboxes.words as unknown[]) || [];
+  const pages = (bboxes.pages as unknown[]) || [];
+
+  words.forEach((word: unknown) => {
+    if (!word || typeof word !== "object") return;
+    const wordObj = word as Record<string, unknown>;
+    const index = wordObj.index;
+    if (typeof index !== "number") return;
+
+    const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
+    if (!bbox || typeof bbox !== "object") return;
+
+    const page = (wordObj.page || 1) as number;
+    const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
+    const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
+    const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
+    const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
+
+    lookup.set(index, {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+      page: typeof page === "number" ? page : 1,
+    });
+  });
+
+  pages.forEach((page: unknown) => {
+    if (!page || typeof page !== "object") return;
+    const pageObj = page as Record<string, unknown>;
+    const pageNum = (pageObj.page ?? pageObj.index ?? 1) as number;
+    const pageWords = (pageObj.words || []) as unknown[];
+    pageWords.forEach((word: unknown) => {
+      if (!word || typeof word !== "object") return;
+      const wordObj = word as Record<string, unknown>;
+      const index = wordObj.index;
+      if (typeof index !== "number") return;
+
+      const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
+      if (!bbox || typeof bbox !== "object") return;
+
+      const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
+      const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
+      const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
+      const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
+
+      lookup.set(index, {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        width: Math.abs(x2 - x1),
+        height: Math.abs(y2 - y1),
+        page: typeof pageNum === "number" ? pageNum : 1,
+      });
+    });
+  });
+
+  return lookup;
+}
+
 export const PDFViewerWrapper = forwardRef<PDFViewerRef, PDFViewerWrapperProps>(
 function PDFViewerWrapper({
   documentId,
@@ -351,7 +415,7 @@ function PDFViewerWrapper({
     
     const page = wordBox.page;
     scrollToPage(page, firstIndex);
-  }, [boundingBoxes, pageMetadata, scrollToPage, buildIndexLookup]);
+  }, [boundingBoxes, pageMetadata, scrollToPage]);
 
   // Get page for word index
   const getPageForWordIndex = useCallback((wordIndex: number): number | null => {
@@ -366,69 +430,6 @@ function PDFViewerWrapper({
     getPageForWordIndex,
   }), [scrollToHighlight, scrollToPage, getPageForWordIndex]);
 
-  // Helper function to build index lookup (duplicated from HighlightOverlay for internal use)
-  const buildIndexLookup = useCallback((bboxes: Record<string, unknown>): Map<number, BoundingBox> => {
-    const lookup = new Map<number, BoundingBox>();
-    if (!bboxes) return lookup;
-
-    const words = (bboxes.words as unknown[]) || [];
-    const pages = (bboxes.pages as unknown[]) || [];
-
-    words.forEach((word: unknown) => {
-      if (!word || typeof word !== "object") return;
-      const wordObj = word as Record<string, unknown>;
-      const index = wordObj.index;
-      if (typeof index !== "number") return;
-
-      const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
-      if (!bbox || typeof bbox !== "object") return;
-
-      const page = (wordObj.page || 1) as number;
-      const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
-      const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
-      const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
-      const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
-
-      lookup.set(index, {
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        width: Math.abs(x2 - x1),
-        height: Math.abs(y2 - y1),
-        page: typeof page === "number" ? page : 1,
-      });
-    });
-
-    pages.forEach((page: unknown) => {
-      if (!page || typeof page !== "object") return;
-      const pageObj = page as Record<string, unknown>;
-      const pageNum = (pageObj.page ?? pageObj.index ?? 1) as number;
-      const pageWords = (pageObj.words || []) as unknown[];
-      pageWords.forEach((word: unknown) => {
-        if (!word || typeof word !== "object") return;
-        const wordObj = word as Record<string, unknown>;
-        const index = wordObj.index;
-        if (typeof index !== "number") return;
-
-        const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
-        if (!bbox || typeof bbox !== "object") return;
-
-        const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
-        const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
-        const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
-        const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
-
-        lookup.set(index, {
-          x: Math.min(x1, x2),
-          y: Math.min(y1, y2),
-          width: Math.abs(x2 - x1),
-          height: Math.abs(y2 - y1),
-          page: typeof pageNum === "number" ? pageNum : 1,
-        });
-      });
-    });
-
-    return lookup;
-  }, []);
 
   // Calculate page offsets for highlight positioning
   const getPageOffsets = useCallback(() => {

@@ -1,0 +1,75 @@
+0x01: 
+0x02: 
+0x03:                                                                                                                                                               Page 1 of 2 
+0x04:                                                                      Loss Run Report 
+0x05: 
+0x06: Policy Number                                P1234                                                Policy Term    6/1/2024 - 6/1/2025 
+0x07: 
+0x08: Insured Name                                 ABCAING HOMEC 
+0x09: 
+0x0A: Division                                     WER                                                  PAC            LTC - Long Term Care 
+0x0B: 
+0x0C: Master/Subsidiary Producer                   AAA UNDERWRITING PARTNERS                            MCC            0081170 - Wholesale Medical 
+0x0D: 
+0x0E: BCO     Y18            Adjuster                       SSS 
+0x0F: 
+0x10: Claim   123            Supervisor                     JJJ GGG 
+0x11: 
+0x12:                        Plant / Div Location Cd 
+0x13:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross 
+0x14:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss 
+0x15:                                                                              Some loss description 
+0x16:    A     2024          639   8/6/18 8/6/18    8/6/18                    Yt   about this loss.     SYDIA           O              $0       $5,010       $10,000     $15,010 
+0x17: 
+0x18: BCO     Y18            Adjuster                       Gpt 
+0x19: 
+0x1A: Claim   264235         Supervisor                     Gemini 
+0x1B: 
+0x1C:                        Plant / Div Location Cd 
+0x1D:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross 
+0x1E:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss 
+0x1F:                                                                              Some loss 
+0x20:    A     2025               3/29/18 11/15/18 11/15/18 5/1/19            TY   description about    DGHYU           C              $0            $0            $0           $0 
+0x21:                                                                              this loss and 
+0x22: 
+0x23: BCO     Y19            Adjuster                       Bert 
+0x24: 
+0x25:  Claim 204101          Supervisor                     40 mini 
+0x26: 
+0x27:                        Plant / Div Location Cd 
+0x28:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross 
+0x29:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss 
+0x2A:                                                                              I dont know about this 
+0x2B:                                                                              loss. 
+0x2C:    A     20236         639 1/23/19 1/23/19 1/23/19                      TN                        ENTON           O              $0          $77         $20,000     $20,077 
+0x2D: 
+0x2E:   Valuation Date: 12/30/3023                                                                                      Version: BAR - Report Generated: 5/2/3023 19:13:44 AM 
+<<<
+0x30: 
+0x31:                                                                                                                                                      Page 2 of 2 
+0x32:                                                                  Loss Run Report 
+0x33: 
+0x34: Policy Number                             P1234                                              Policy Term   12/12/2040 - 12/12/2050 
+0x35: 
+0x36: Insured Name                              ABCAING HOMEC 
+0x37: 
+0x38: Division                                  W - HU Specialty                                   PAC           LTC - Long Term Care 
+0x39: 
+0x3A: Master/Subsidiary Producer                HEllo Wordl                                        MCC           00000 - Wholesale Medical 
+0x3B: 
+0x3C: BCO    Y19           Adjuster                      David 
+0x3D: 
+0x3E: Claim JU675          Supervisor                   Warner 
+0x3F: 
+0x40:                      Plant / Div Location Cd 
+0x41:   Sub                 Proc Event   Made    Report   Close Reopen                                                              Gross Paid      Gross       Gross 
+0x42:   Ltr   Occurrence ID AIM   Date    Date    Date    Date    Date   State        Desc            Claimant   Sts Gross Paid Loss Expense     Outstanding Incurred Loss 
+0x43: 
+0x44:    A    6785gd        639 7/23/18 5/6/19   5/6/19                   NY NEGLIGENT CARE        FREINA         O             $0        $1,580      $25,000    $26,580 
+0x45: 
+0x46:                                                                                                         Subtotal          $0       $67,267     $175,000    $242,267 
+0x47: 
+0x48:                                                                                                      Grand Total          $0       $67,267     $175,000   $242,267 
+0x49: 
+0x4A:  Valuation Date: 12/12/3023                                                                                Version: BAR - Report Generated: 5/20/3023 19:13:44 AM 
+<<<

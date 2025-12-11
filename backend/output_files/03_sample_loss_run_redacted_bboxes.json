@@ -1,0 +1,385 @@
+{
+    "whisperHash": "142dd77f|e2b8a680f86e4edd3f03294b4aea57e0",
+    "line_metadata": [
+        {
+            "line_number": 1,
+            "text": "0x01: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 2,
+            "text": "0x02: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 3,
+            "text": "0x03:                                                                                                                                                               Page 1 of 2 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 4,
+            "text": "0x04:                                                                      Loss Run Report ",
+            "raw_box": null
+        },
+        {
+            "line_number": 5,
+            "text": "0x05: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 6,
+            "text": "0x06: Policy Number                                P1234                                                Policy Term    6/1/2024 - 6/1/2025 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 7,
+            "text": "0x07: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 8,
+            "text": "0x08: Insured Name                                 ABCAING HOMEC ",
+            "raw_box": null
+        },
+        {
+            "line_number": 9,
+            "text": "0x09: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 10,
+            "text": "0x0A: Division                                     WER                                                  PAC            LTC - Long Term Care ",
+            "raw_box": null
+        },
+        {
+            "line_number": 11,
+            "text": "0x0B: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 12,
+            "text": "0x0C: Master/Subsidiary Producer                   AAA UNDERWRITING PARTNERS                            MCC            0081170 - Wholesale Medical ",
+            "raw_box": null
+        },
+        {
+            "line_number": 13,
+            "text": "0x0D: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 14,
+            "text": "0x0E: BCO     Y18            Adjuster                       SSS ",
+            "raw_box": null
+        },
+        {
+            "line_number": 15,
+            "text": "0x0F: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 16,
+            "text": "0x10: Claim   123            Supervisor                     JJJ GGG ",
+            "raw_box": null
+        },
+        {
+            "line_number": 17,
+            "text": "0x11: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 18,
+            "text": "0x12:                        Plant / Div Location Cd ",
+            "raw_box": null
+        },
+        {
+            "line_number": 19,
+            "text": "0x13:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross ",
+            "raw_box": null
+        },
+        {
+            "line_number": 20,
+            "text": "0x14:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss ",
+            "raw_box": null
+        },
+        {
+            "line_number": 21,
+            "text": "0x15:                                                                              Some loss description ",
+            "raw_box": null
+        },
+        {
+            "line_number": 22,
+            "text": "0x16:    A     2024          639   8/6/18 8/6/18    8/6/18                    Yt   about this loss.     SYDIA           O              $0       $5,010       $10,000     $15,010 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 23,
+            "text": "0x17: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 24,
+            "text": "0x18: BCO     Y18            Adjuster                       Gpt ",
+            "raw_box": null
+        },
+        {
+            "line_number": 25,
+            "text": "0x19: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 26,
+            "text": "0x1A: Claim   264235         Supervisor                     Gemini ",
+            "raw_box": null
+        },
+        {
+            "line_number": 27,
+            "text": "0x1B: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 28,
+            "text": "0x1C:                        Plant / Div Location Cd ",
+            "raw_box": null
+        },
+        {
+            "line_number": 29,
+            "text": "0x1D:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross ",
+            "raw_box": null
+        },
+        {
+            "line_number": 30,
+            "text": "0x1E:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss ",
+            "raw_box": null
+        },
+        {
+            "line_number": 31,
+            "text": "0x1F:                                                                              Some loss ",
+            "raw_box": null
+        },
+        {
+            "line_number": 32,
+            "text": "0x20:    A     2025               3/29/18 11/15/18 11/15/18 5/1/19            TY   description about    DGHYU           C              $0            $0            $0           $0 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 33,
+            "text": "0x21:                                                                              this loss and ",
+            "raw_box": null
+        },
+        {
+            "line_number": 34,
+            "text": "0x22: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 35,
+            "text": "0x23: BCO     Y19            Adjuster                       Bert ",
+            "raw_box": null
+        },
+        {
+            "line_number": 36,
+            "text": "0x24: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 37,
+            "text": "0x25:  Claim 204101          Supervisor                     40 mini ",
+            "raw_box": null
+        },
+        {
+            "line_number": 38,
+            "text": "0x26: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 39,
+            "text": "0x27:                        Plant / Div Location Cd ",
+            "raw_box": null
+        },
+        {
+            "line_number": 40,
+            "text": "0x28:   Sub                  Proc Event     Made    Report   Close   Reopen                                                                 Gross Paid      Gross        Gross ",
+            "raw_box": null
+        },
+        {
+            "line_number": 41,
+            "text": "0x29:    Ltr   Occurrence ID AIM    Date    Date     Date     Date    Date   State         Desc             Claimant    Sts Gross Paid Loss Expense       Outstanding Incurred Loss ",
+            "raw_box": null
+        },
+        {
+            "line_number": 42,
+            "text": "0x2A:                                                                              I dont know about this ",
+            "raw_box": null
+        },
+        {
+            "line_number": 43,
+            "text": "0x2B:                                                                              loss. ",
+            "raw_box": null
+        },
+        {
+            "line_number": 44,
+            "text": "0x2C:    A     20236         639 1/23/19 1/23/19 1/23/19                      TN                        ENTON           O              $0          $77         $20,000     $20,077 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 45,
+            "text": "0x2D: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 46,
+            "text": "0x2E:   Valuation Date: 12/30/3023                                                                                      Version: BAR - Report Generated: 5/2/3023 19:13:44 AM ",
+            "raw_box": null
+        },
+        {
+            "line_number": 47,
+            "text": "<<<\f",
+            "raw_box": null
+        },
+        {
+            "line_number": 48,
+            "text": "0x30: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 49,
+            "text": "0x31:                                                                                                                                                      Page 2 of 2 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 50,
+            "text": "0x32:                                                                  Loss Run Report ",
+            "raw_box": null
+        },
+        {
+            "line_number": 51,
+            "text": "0x33: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 52,
+            "text": "0x34: Policy Number                             P1234                                              Policy Term   12/12/2040 - 12/12/2050 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 53,
+            "text": "0x35: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 54,
+            "text": "0x36: Insured Name                              ABCAING HOMEC ",
+            "raw_box": null
+        },
+        {
+            "line_number": 55,
+            "text": "0x37: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 56,
+            "text": "0x38: Division                                  W - HU Specialty                                   PAC           LTC - Long Term Care ",
+            "raw_box": null
+        },
+        {
+            "line_number": 57,
+            "text": "0x39: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 58,
+            "text": "0x3A: Master/Subsidiary Producer                HEllo Wordl                                        MCC           00000 - Wholesale Medical ",
+            "raw_box": null
+        },
+        {
+            "line_number": 59,
+            "text": "0x3B: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 60,
+            "text": "0x3C: BCO    Y19           Adjuster                      David ",
+            "raw_box": null
+        },
+        {
+            "line_number": 61,
+            "text": "0x3D: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 62,
+            "text": "0x3E: Claim JU675          Supervisor                   Warner ",
+            "raw_box": null
+        },
+        {
+            "line_number": 63,
+            "text": "0x3F: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 64,
+            "text": "0x40:                      Plant / Div Location Cd ",
+            "raw_box": null
+        },
+        {
+            "line_number": 65,
+            "text": "0x41:   Sub                 Proc Event   Made    Report   Close Reopen                                                              Gross Paid      Gross       Gross ",
+            "raw_box": null
+        },
+        {
+            "line_number": 66,
+            "text": "0x42:   Ltr   Occurrence ID AIM   Date    Date    Date    Date    Date   State        Desc            Claimant   Sts Gross Paid Loss Expense     Outstanding Incurred Loss ",
+            "raw_box": null
+        },
+        {
+            "line_number": 67,
+            "text": "0x43: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 68,
+            "text": "0x44:    A    6785gd        639 7/23/18 5/6/19   5/6/19                   NY NEGLIGENT CARE        FREINA         O             $0        $1,580      $25,000    $26,580 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 69,
+            "text": "0x45: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 70,
+            "text": "0x46:                                                                                                         Subtotal          $0       $67,267     $175,000    $242,267 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 71,
+            "text": "0x47: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 72,
+            "text": "0x48:                                                                                                      Grand Total          $0       $67,267     $175,000   $242,267 ",
+            "raw_box": null
+        },
+        {
+            "line_number": 73,
+            "text": "0x49: ",
+            "raw_box": null
+        },
+        {
+            "line_number": 74,
+            "text": "0x4A:  Valuation Date: 12/12/3023                                                                                Version: BAR - Report Generated: 5/20/3023 19:13:44 AM ",
+            "raw_box": null
+        },
+        {
+            "line_number": 75,
+            "text": "<<<\f",
+            "raw_box": null
+        },
+        {
+            "line_number": 76,
+            "text": "",
+            "raw_box": null
+        }
+    ]
+}
