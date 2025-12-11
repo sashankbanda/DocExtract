@@ -102,10 +102,8 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     
     # Get highlight data with exact line ranges (not "1-5000")
     highlight_data = await get_highlight_data(
-        client=client,
         whisper_hash=whisper_hash,
         line_numbers=line_numbers,
-        headers={"unstract-key": LLMWHISPERER_API_KEY},
     )
     
     # Extract bounding boxes: prefer highlight_data, fallback to extraction result
@@ -422,10 +420,8 @@ def _generate_word_level_boxes(
 
 
 async def get_highlight_data(
-    client: httpx.AsyncClient,
     whisper_hash: str,
     line_numbers: List[int],
-    headers: Dict[str, str],
 ) -> Dict[str, Any]:
     """
     Fetch highlight/bounding box data for a processed document.
@@ -434,14 +430,22 @@ async def get_highlight_data(
     not a generic "1-5000" range.
     
     Args:
-        client: HTTP client
         whisper_hash: Whisper hash for the document
         line_numbers: List of line numbers to request (1-based, from hex parsing)
-        headers: Request headers
         
     Returns:
         Highlight data with bounding boxes
     """
+    import httpx
+    
+    if not LLMWHISPERER_API_KEY:
+        logger.warning("LLMWHISPERER_API_KEY not configured, cannot fetch highlight data")
+        return {}
+    
+    headers = {
+        "unstract-key": LLMWHISPERER_API_KEY,
+    }
+    
     if not line_numbers:
         logger.warning("No line numbers provided, requesting all lines")
         line_numbers = [1]  # Fallback
@@ -476,17 +480,18 @@ async def get_highlight_data(
             
             line_range = ",".join(ranges)
         
-        # Try dedicated highlight endpoint with exact line ranges
-        highlight_response = await client.get(
-            f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-highlight",
-            params={
-                "whisper_hash": whisper_hash,
-                "line_range": line_range,
-            },
-            headers=headers,
-            timeout=httpx.Timeout(30.0),
-        )
-        if highlight_response.status_code == 200:
+        # Create own client to avoid closed client issues
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Try dedicated highlight endpoint with exact line ranges
+            highlight_response = await client.get(
+                f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-highlight",
+                params={
+                    "whisper_hash": whisper_hash,
+                    "line_range": line_range,
+                },
+                headers=headers,
+            )
+            highlight_response.raise_for_status()
             data = highlight_response.json()
             # Ensure raw_box is never null
             if isinstance(data, dict) and "line_metadata" in data:
