@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
+from unstract.llmwhisperer import LLMWhispererClientV2
 
 from utils.file_saver import get_input_path, save_bytes
 
@@ -18,6 +19,12 @@ LLMWHISPERER_BASE_URL = os.getenv(
 LLMWHISPERER_API_KEY = os.getenv("LLMWHISPERER_API_KEY")
 POLL_INTERVAL_SECONDS = float(os.getenv("LLMWHISPERER_POLL_INTERVAL", "2.0"))
 MAX_POLL_ATTEMPTS = int(os.getenv("LLMWHISPERER_MAX_POLLS", "90"))
+
+# Initialize LLMWhisperer SDK V2 client
+llmw_client = LLMWhispererClientV2(
+    base_url="https://llmwhisperer-api.us-central.unstract.com/api/v2",
+    api_key=LLMWHISPERER_API_KEY
+)
 
 
 async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
@@ -96,42 +103,29 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     # Try multiple paths to find result_text (API structure varies)
     result_text = _extract_result_text(extraction)
     
-    # Get highlight data with fixed catch-all range
-    highlight_response = await get_highlight_data(whisper_hash=whisper_hash)
+    # Get highlight data using SDK
+    highlight_result = await get_highlight_data(whisper_hash)
     
-    # Standardize bounding_boxes structure
-    # Only use fallback if highlight API returns empty dict or no line_metadata
-    if not highlight_response or not isinstance(highlight_response, dict):
-        # Empty response - use fallback
-        logger.warning("Highlight API returned empty response, using fallback generation from extraction result")
-        line_metadata = _extract_nested(extraction, "line_metadata")
-        if line_metadata:
-            bounding_boxes = {"line_metadata": line_metadata}
-        else:
-            bounding_boxes = None
-    elif not highlight_response.get("line_metadata"):
-        # No line_metadata in response - use fallback
-        logger.warning("Highlight API returned no line_metadata, using fallback generation from extraction result")
-        line_metadata = _extract_nested(extraction, "line_metadata")
-        if line_metadata:
-            bounding_boxes = {"line_metadata": line_metadata}
-        else:
-            bounding_boxes = None
+    if highlight_result and "line_metadata" in highlight_result:
+        line_metadata = highlight_result["line_metadata"]
     else:
-        # Valid response with line_metadata - use it directly
-        bounding_boxes = highlight_response
-        # Ensure it's a dict with line_metadata key
-        if isinstance(bounding_boxes, list):
-            bounding_boxes = {"line_metadata": bounding_boxes}
-        logger.info(f"Using {len(bounding_boxes.get('line_metadata', []))} lines from highlight API")
+        logger.warning("No highlight metadata from SDK, using fallback generation.")
+        line_metadata = _extract_nested(extraction, "line_metadata") or []
     
+    # Normalize bounding_boxes structure
     # Generate word-level boxes from line-level boxes
-    # Only generate if we have valid bounding_boxes and text
-    if bounding_boxes and result_text:
-        n_lines_before = len(bounding_boxes.get("line_metadata", [])) if isinstance(bounding_boxes, dict) else 0
-        bounding_boxes = _generate_word_level_boxes(bounding_boxes, result_text)
-        n_words_after = len(bounding_boxes.get("words", [])) if isinstance(bounding_boxes, dict) else 0
-        logger.info(f"Generated {n_words_after} word boxes from {n_lines_before} lines for {upload_file.filename or 'unknown'}")
+    if line_metadata and result_text:
+        words = _generate_word_level_boxes_from_line_metadata(line_metadata, result_text)
+        bounding_boxes = {
+            "line_metadata": line_metadata,
+            "words": words
+        }
+        logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines for {upload_file.filename or 'unknown'}")
+    else:
+        bounding_boxes = {
+            "line_metadata": line_metadata,
+            "words": []
+        }
     
     return {
         "file_name": upload_file.filename or "unknown",
@@ -275,284 +269,130 @@ async def _retrieve_result(
 
 
 
-def _generate_word_level_boxes(
-    bounding_boxes: Dict[str, Any], text: str
-) -> Dict[str, Any]:
+def _generate_word_level_boxes_from_line_metadata(
+    line_metadata: List[Dict[str, Any]], text: str
+) -> List[Dict[str, Any]]:
     """
-    Generate word-level bounding boxes from line-level boxes.
-    
-    Handles cases where raw_box is null by generating boxes from line_metadata.
-    Uses proportional width calculation based on character count.
+    Create word-level bounding boxes using real raw_box from highlight API.
     
     Args:
-        bounding_boxes: Line-level bounding box data (must have line_metadata)
-        text: The layout-preserving text with hex line numbers
+        line_metadata: List of line metadata dicts with raw_box
+        text: The layout-preserving text (for reference, not used directly)
         
     Returns:
-        Dictionary with word-level boxes and updated line_metadata:
-        {
-            "words": [{index, page, text, bbox: {x, y, width, height}}],
-            "line_metadata": [...]  # with raw_box populated
-        }
+        List of word boxes with index, page, text, bbox coordinates
     """
-    import re
-    
-    # Extract line metadata
-    line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
-    if not isinstance(line_metadata, list):
-        logger.warning("No line_metadata found, cannot generate word-level boxes")
-        return bounding_boxes
-    
-    words_output: List[Dict[str, Any]] = []
+    words = []
     global_word_index = 0
-    updated_line_metadata: List[Dict[str, Any]] = []
     
-    # Process each line
-    for line_data in line_metadata:
-        if not isinstance(line_data, dict):
-            updated_line_metadata.append(line_data)
+    for line in line_metadata:
+        if not isinstance(line, dict):
+            continue
+            
+        raw_box = line.get("raw_box")
+        if not raw_box or not isinstance(raw_box, list) or len(raw_box) < 4:
             continue
         
-        # Get line text - remove hex line numbers for word extraction
-        line_text_raw = line_data.get("text", "")
-        line_text = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', line_text_raw).strip()
+        page, base_y, height, page_height = raw_box[0], raw_box[1], raw_box[2], raw_box[3]
         
-        # Skip empty lines
+        line_text = line.get("text", "")
         if not line_text:
-            updated_line_metadata.append(line_data)
             continue
         
-        # Extract bounding box - API returns "raw" field, normalize to "raw_box"
-        # Use: raw_box = line["raw"] or line["raw_box"]
-        raw_box = line_data.get("raw") or line_data.get("raw_box")
-        bbox = raw_box or line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box")
+        # Remove hex line numbers for word extraction
+        import re
+        line_text = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', line_text).strip()
         
-        # Parse bounding box format
-        page = 1
-        line_x = 0
-        line_y = 0
-        line_width = 0
-        line_height = 0
-        page_height = 0
-        page_width = 0
-        
-        if bbox:
-            if isinstance(bbox, list) and len(bbox) >= 4:
-                # Format: [page, base_y, height, page_height]
-                page = int(bbox[0]) if bbox[0] else 1
-                line_y = float(bbox[1]) if bbox[1] else 0
-                line_height = float(bbox[2]) if bbox[2] else 0
-                page_height = float(bbox[3]) if len(bbox) > 3 and bbox[3] else 0
-                # Estimate width from page height (A4 aspect ratio ≈ 0.707)
-                if page_height > 0:
-                    page_width = page_height * 0.707
-                    line_width = page_width  # Full line width
-                else:
-                    line_width = line_height * 50  # Rough estimate
-            elif isinstance(bbox, dict):
-                page = int(bbox.get("page", 1))
-                line_x = float(bbox.get("x", bbox.get("left", 0)))
-                line_y = float(bbox.get("y", bbox.get("top", bbox.get("base_y", 0))))
-                line_width = float(bbox.get("width", bbox.get("right", 0) - bbox.get("left", 0)))
-                line_height = float(bbox.get("height", bbox.get("bottom", 0) - bbox.get("top", 0)))
-                page_height = float(bbox.get("page_height", bbox.get("pageHeight", 0)))
-                page_width = float(bbox.get("page_width", bbox.get("pageWidth", 0)))
-        
-        # If no bbox found, try to infer from line_data fields
-        if line_width <= 0 or line_height <= 0:
-            # Try to get from line_data directly
-            if "width" in line_data:
-                line_width = float(line_data["width"])
-            elif "x" in line_data and "right" in line_data:
-                line_x = float(line_data.get("x", 0))
-                line_width = float(line_data["right"]) - line_x
-            elif "left" in line_data and "right" in line_data:
-                line_x = float(line_data.get("left", 0))
-                line_width = float(line_data["right"]) - line_x
-            
-            if "height" in line_data:
-                line_height = float(line_data["height"])
-            elif "y" in line_data or "base_y" in line_data:
-                line_y = float(line_data.get("y", line_data.get("base_y", 0)))
-            
-            page = int(line_data.get("page", line_data.get("page_number", 1)))
-        
-        # If still no valid dimensions, try to use raw_box directly
-        if line_width <= 0 or line_height <= 0:
-            if raw_box and isinstance(raw_box, list) and len(raw_box) >= 4:
-                # Use raw_box directly: [page, y, height, page_height]
-                page = int(raw_box[0]) if raw_box[0] else 1
-                line_y = float(raw_box[1]) if raw_box[1] else 0
-                line_height = float(raw_box[2]) if raw_box[2] else 0
-                page_height = float(raw_box[3]) if raw_box[3] else 0
-                # Estimate width from page height
-                if page_height > 0:
-                    page_width = page_height * 0.707  # A4 aspect ratio
-                    line_width = page_width
-                else:
-                    line_width = line_height * 50  # Rough estimate
-            else:
-                # No valid dimensions and no raw_box - skip this line
-                if not raw_box:
-                    updated_line = {**line_data, "raw_box": None}
-                else:
-                    updated_line = {**line_data, "raw_box": raw_box}
-                updated_line_metadata.append(updated_line)
-                continue
-        
-        # Split line into words (preserve punctuation attached to tokens)
-        line_words = line_text.split()
-        if not line_words:
-            # No words, but ensure raw_box is set
-            if not raw_box:
-                updated_line = {**line_data, "raw_box": [page, line_y, line_height, page_height] if page_height > 0 else [page, line_y, line_height, 0]}
-            else:
-                updated_line = line_data
-            updated_line_metadata.append(updated_line)
+        tokens = line_text.split()
+        if not tokens:
             continue
         
-        # Calculate proportional widths for each word
-        total_chars = sum(len(word) for word in line_words)
+        # Compute per-word width
+        total_chars = sum(len(t) for t in tokens)
         if total_chars == 0:
-            total_chars = len(line_words)  # Fallback: equal width
+            continue
         
-        current_x = line_x
-        for word in line_words:
-            # Proportional width based on character count
-            word_width_ratio = len(word) / total_chars if total_chars > 0 else 1.0 / len(line_words)
-            word_width = round(line_width * word_width_ratio)
+        # Estimate line width from page height (A4 aspect ratio)
+        if page_height > 0:
+            line_width = page_height * 0.707  # A4 aspect ratio
+        else:
+            line_width = height * 50  # Rough estimate
+        
+        x_cursor = 0
+        for token in tokens:
+            token_width_ratio = len(token) / total_chars
+            token_width = line_width * token_width_ratio
             
-            # Ensure minimum width
-            if word_width < 1:
-                word_width = 1
-            
-            # Store word-level box with text
-            words_output.append({
+            words.append({
                 "index": global_word_index,
-                "page": page,
-                "text": word,
+                "text": token,
+                "page": int(page),
                 "bbox": {
-                    "x": current_x,
-                    "y": line_y,
-                    "width": word_width,
-                    "height": line_height,
-                }
+                    "x": x_cursor,
+                    "y": float(base_y),
+                    "width": token_width,
+                    "height": float(height),
+                },
+                "page_height": float(page_height) if page_height else 0
             })
             
-            current_x += word_width
+            x_cursor += token_width
             global_word_index += 1
-        
-        # Ensure raw_box is populated for the line
-        # Normalize: ensure every line has raw_box with [page, y, height, page_height]
-        if not raw_box:
-            # Generate from computed values
-            raw_box = [page, line_y, line_height, page_height] if page_height > 0 else [page, line_y, line_height, 0]
-            logger.debug(f"Generated raw_box for line {line_data.get('line_number', 'unknown')}: {raw_box}")
-        elif isinstance(raw_box, list) and len(raw_box) >= 4:
-            # Ensure page and page_height are set in line_data
-            if "page" not in line_data:
-                line_data["page"] = int(raw_box[0]) if raw_box[0] else 1
-            if "page_height" not in line_data:
-                line_data["page_height"] = float(raw_box[3]) if len(raw_box) > 3 and raw_box[3] else 0
-        
-        updated_line = {**line_data, "raw_box": raw_box}
-        # Ensure page and page_height are in the updated line
-        if "page" not in updated_line:
-            updated_line["page"] = page
-        if "page_height" not in updated_line and page_height > 0:
-            updated_line["page_height"] = page_height
-        updated_line_metadata.append(updated_line)
     
-    # Log generation results
-    logger.info(f"Generated {len(words_output)} word boxes from {len(line_metadata)} lines")
-    
-    # Return both word-level boxes and updated line_metadata
-    result = {
-        "words": words_output,
-        "line_metadata": updated_line_metadata,
-    }
-    
-    # Preserve other keys from original bounding_boxes
-    for key in bounding_boxes:
-        if key not in {"words", "line_metadata", "lines"}:
-            result[key] = bounding_boxes[key]
-    
-    return result
+    logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines.")
+    return words
 
 
-async def get_highlight_data(
-    whisper_hash: str,
-) -> Dict[str, Any]:
+async def get_highlight_data(whisper_hash: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch highlight/bounding box data for a processed document.
+    Fetch highlight bounding boxes using LLMWhisperer SDK V2.
     
-    Uses fixed catch-all range "0x01-0xFFFF" to ensure API returns
-    bounding boxes for every line.
+    This completely replaces the old httpx-based highlight logic.
     
     Args:
         whisper_hash: Whisper hash for the document
         
     Returns:
-        Highlight data with bounding boxes, or empty dict if API fails
+        Dict with line_metadata, or None if API fails
     """
-    import httpx
-    
-    if not LLMWHISPERER_API_KEY:
-        logger.warning("LLMWHISPERER_API_KEY not configured, cannot fetch highlight data")
-        return {}
-    
-    headers = {
-        "unstract-key": LLMWHISPERER_API_KEY,
-    }
-    
-    # Use fixed catch-all range to get all lines
-    line_range = "0x01-0xFFFF"
-    logger.info(f"Using full highlight range: {line_range}")
-    
     try:
-        # Create own client to avoid closed client issues
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Call highlight endpoint with fixed range
-            highlight_response = await client.get(
-                f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-highlight",
-                params={
-                    "whisper_hash": whisper_hash,
-                    "line_range": line_range,
-                },
-                headers=headers,
-            )
-            highlight_response.raise_for_status()
-            data = highlight_response.json()
+        # Always fetch a large range
+        line_range = "1-5000"
+        logger.info(f"Requesting highlight data via SDK for range {line_range}")
+        
+        data = llmw_client.get_highlight_data(
+            whisper_hash=whisper_hash,
+            lines=line_range
+        )
+        
+        if not data:
+            logger.warning("Highlight data empty — fallback will be used.")
+            return None
+        
+        line_metadata = []
+        
+        for line_no, entry in data.items():
+            raw = entry.get("raw") or entry.get("raw_box")
             
-            # Normalize raw_box from "raw" field
-            if isinstance(data, dict) and "line_metadata" in data:
-                line_count = 0
-                for line in data.get("line_metadata", []):
-                    if isinstance(line, dict):
-                        line_count += 1
-                        # API returns "raw" field, normalize to "raw_box"
-                        raw_box = line.get("raw") or line.get("raw_box")
-                        if raw_box:
-                            line["raw_box"] = raw_box
-                            # Ensure page and page_height are set
-                            if "page" not in line and isinstance(raw_box, list) and len(raw_box) > 0:
-                                line["page"] = int(raw_box[0]) if raw_box[0] else 1
-                            if "page_height" not in line and isinstance(raw_box, list) and len(raw_box) > 3:
-                                line["page_height"] = float(raw_box[3]) if raw_box[3] else 0
-                
-                logger.info(f"Highlight API returned {line_count} lines")
-                return data
+            if not raw or len(raw) < 4:
+                logger.warning(f"Missing raw for line {line_no}, skipping.")
+                continue
             
-            # If no line_metadata, return empty dict
-            logger.warning("Highlight API returned no line_metadata")
-            return {}
+            # raw = [page, base_y, height, page_height]
+            page = entry.get("page", raw[0])
+            base_y = entry.get("base_y", raw[1])
+            height = entry.get("height", raw[2])
+            page_height = entry.get("page_height", raw[3])
             
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            logger.warning("Highlight endpoint not available (404)")
-        else:
-            logger.warning(f"Highlight endpoint returned error: {exc.response.status_code} - {exc.response.text}")
-        return {}
-    except httpx.HTTPError as exc:
-        logger.warning(f"Failed to reach highlight endpoint: {exc}")
-        return {}
+            line_metadata.append({
+                "line_no": line_no,
+                "raw_box": [page, base_y, height, page_height],
+                "text": entry.get("text", "")
+            })
+        
+        logger.info(f"Received {len(line_metadata)} highlight lines from SDK.")
+        return {"line_metadata": line_metadata}
+        
+    except Exception as e:
+        logger.error(f"Highlight SDK error: {e}")
+        return None
