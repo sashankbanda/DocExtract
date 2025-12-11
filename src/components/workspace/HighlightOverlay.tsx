@@ -215,18 +215,18 @@ export function HighlightOverlay({
   const [clickedHighlightId, setClickedHighlightId] = useState<string | null>(null);
   const [pulseHighlightId, setPulseHighlightId] = useState<string | null>(null);
 
-  // Determine which API to use
-  const useNewAPI = boundingBoxes !== undefined && selectedIndexes.length > 0;
+  // Determine which API to use - use new API if boundingBoxes is provided
+  const useNewAPI = boundingBoxes !== undefined;
 
   // Convert word indexes to bounding boxes (new API)
   const wordIndexesToBoxes = useMemo(() => {
-    if (!useNewAPI || !boundingBoxes || selectedIndexes.length === 0) return [];
+    if (!useNewAPI || !boundingBoxes) return [];
 
     const lookup = buildIndexLookup(boundingBoxes);
     const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
 
-    // Get unique indexes
-    const uniqueIndexes = Array.from(new Set(selectedIndexes));
+    // Get unique indexes (can be empty for active highlights)
+    const uniqueIndexes = Array.from(new Set(selectedIndexes || []));
 
     uniqueIndexes.forEach((index) => {
       const box = lookup.get(index);
@@ -272,17 +272,26 @@ export function HighlightOverlay({
 
     return mergedHighlights.map((highlight) => {
       const pageIndex = highlight.page - 1;
+      const pageMeta = pageMetadata[pageIndex];
+      if (!pageMeta) return highlight;
+
       const pageOffset = pageOffsets[pageIndex] || 0;
+      const pageHeight = pageMeta.height;
+
+      // PDF.js uses bottom-left origin, HTML uses top-left
+      // Convert Y coordinate: y_pdf = pageHeight - y_html - height
+      // So: y_html = pageHeight - y_pdf - height
+      const flippedY = pageHeight - highlight.y - highlight.height;
 
       return {
         ...highlight,
         x: highlight.x * currentScale,
-        y: highlight.y * currentScale + pageOffset,
+        y: flippedY * currentScale + pageOffset,
         width: highlight.width * currentScale,
         height: highlight.height * currentScale,
       };
     });
-  }, [useNewAPI, mergedHighlights, currentScale, pageOffsets, highlights, scale]);
+  }, [useNewAPI, mergedHighlights, currentScale, pageOffsets, pageMetadata, highlights, scale]);
 
   // Handle highlight click - scroll to page and show glow
   const handleHighlightClick = useCallback(
@@ -334,7 +343,11 @@ export function HighlightOverlay({
     if (clickedHighlightId) return clickedHighlightId;
     
     if (useNewAPI) {
-      return activeHighlightId;
+      // If activeHighlightId is set and we have selectedIndexes, show active highlights
+      if (activeHighlightId && selectedIndexes && selectedIndexes.length > 0) {
+        return activeHighlightId;
+      }
+      return null;
     }
     // Legacy API: check if any highlight matches activeHighlight
     if (!activeHighlight) return null;
@@ -346,7 +359,7 @@ export function HighlightOverlay({
         Math.abs(h.height - activeHighlight.height * scale) < 1
     );
     return matchingIndex >= 0 ? positionedHighlights[matchingIndex].id : null;
-  }, [clickedHighlightId, useNewAPI, activeHighlightId, activeHighlight, positionedHighlights, scale]);
+  }, [clickedHighlightId, useNewAPI, activeHighlightId, selectedIndexes, activeHighlight, positionedHighlights, scale]);
 
   // Clear glow timeout on unmount
   useEffect(() => {
@@ -364,8 +377,9 @@ export function HighlightOverlay({
 
   // Separate preview (hover) and active (clicked) highlights
   const previewHighlights = useMemo(() => {
-    // Preview highlights are from selectedIndexes (hover state)
-    if (!useNewAPI || !boundingBoxes || selectedIndexes.length === 0) return [];
+    // Preview highlights are from selectedIndexes (hover state) - exclude active highlights
+    if (!useNewAPI || !boundingBoxes || !selectedIndexes || selectedIndexes.length === 0) return [];
+    if (effectiveActiveHighlightId) return []; // Don't show preview when active highlight is shown
     
     const lookup = buildIndexLookup(boundingBoxes);
     const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
@@ -381,23 +395,32 @@ export function HighlightOverlay({
     const merged = mergeBoxes(boxes);
     return merged.map((highlight) => {
       const pageIndex = highlight.page - 1;
+      const pageMeta = pageMetadata[pageIndex];
+      if (!pageMeta) return highlight;
+
       const pageOffset = pageOffsets[pageIndex] || 0;
+      const pageHeight = pageMeta.height;
+
+      // Convert Y coordinate from PDF.js (bottom-left) to HTML (top-left)
+      const flippedY = pageHeight - highlight.y - highlight.height;
+
       return {
         ...highlight,
         x: highlight.x * currentScale,
-        y: highlight.y * currentScale + pageOffset,
+        y: flippedY * currentScale + pageOffset,
         width: highlight.width * currentScale,
         height: highlight.height * currentScale,
       };
     });
-  }, [useNewAPI, boundingBoxes, selectedIndexes, currentScale, pageOffsets]);
+  }, [useNewAPI, boundingBoxes, selectedIndexes, currentScale, pageOffsets, pageMetadata, effectiveActiveHighlightId]);
 
   const activeHighlights = useMemo(() => {
-    // Active highlights are from activeHighlightId (clicked state)
-    if (effectiveActiveHighlightId) {
-      return positionedHighlights.filter((h) => h.id === effectiveActiveHighlightId);
-    }
-    return [];
+    // Active highlights are shown when activeHighlightId is set
+    // They use the same selectedIndexes but with different styling
+    if (!effectiveActiveHighlightId) return [];
+    
+    // Return all positioned highlights when active (they're already filtered by selectedIndexes)
+    return positionedHighlights;
   }, [positionedHighlights, effectiveActiveHighlightId]);
 
   return (
@@ -423,14 +446,14 @@ export function HighlightOverlay({
       </AnimatePresence>
 
       {/* Active layer (clicked highlights) - prominent with glow */}
-      {positionedHighlights.map((highlight) => {
-        const isActive = effectiveActiveHighlightId === highlight.id;
+      {activeHighlights.map((highlight) => {
+        const isActive = effectiveActiveHighlightId !== null;
         const isPulsing = pulseHighlightId === highlight.id;
 
         return (
           <motion.div
-            key={highlight.id}
-            className="absolute bg-blue-500/25 border border-blue-400/60 rounded-md pointer-events-auto cursor-pointer"
+            key={`active-${highlight.id}`}
+            className="absolute bg-blue-500/30 border-2 border-blue-500 rounded-md pointer-events-auto cursor-pointer z-10"
             style={{
               left: highlight.x,
               top: highlight.y,
@@ -450,11 +473,11 @@ export function HighlightOverlay({
             <AnimatePresence>
               {isPulsing && (
                 <motion.div
-                  className="absolute -inset-1 bg-blue-500/40 rounded-lg pointer-events-none"
+                  className="absolute -inset-1 bg-blue-500/50 rounded-lg pointer-events-none"
                   initial={{ opacity: 0, scale: 1 }}
                   animate={{ 
-                    opacity: [0, 0.6, 0],
-                    scale: [1, 1.05, 1],
+                    opacity: [0, 0.8, 0],
+                    scale: [1, 1.1, 1],
                   }}
                   exit={{ opacity: 0 }}
                   transition={{
@@ -469,10 +492,10 @@ export function HighlightOverlay({
             <AnimatePresence>
               {isActive && (
                 <motion.div
-                  className="absolute -inset-2 bg-blue-500/30 rounded-lg blur-md pointer-events-none"
+                  className="absolute -inset-2 bg-blue-500/40 rounded-lg blur-md pointer-events-none"
                   initial={{ opacity: 0 }}
                   animate={{
-                    opacity: [0.4, 0.7, 0.4],
+                    opacity: [0.5, 0.8, 0.5],
                   }}
                   exit={{ opacity: 0 }}
                   transition={{

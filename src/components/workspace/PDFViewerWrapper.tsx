@@ -95,17 +95,21 @@ function PDFViewerWrapper({
         renderTaskRef.current.forEach((task) => task.cancel());
         renderTaskRef.current.clear();
 
-        // Load PDF document
+        // Load PDF document from File object (as ArrayBuffer) or URL string
         let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
         
         if (pdfSource instanceof File) {
-          const arrayBuffer = await pdfSource.arrayBuffer();
-          loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        } else if (pdfSource instanceof ArrayBuffer || pdfSource instanceof Uint8Array) {
-          loadingTask = pdfjsLib.getDocument({ data: pdfSource });
-        } else {
-          // URL string
+          // Convert File to ArrayBuffer and load
+          const buffer = await pdfSource.arrayBuffer();
+          loadingTask = pdfjsLib.getDocument({ data: buffer });
+        } else if (typeof pdfSource === "string") {
+          // Load from URL string
           loadingTask = pdfjsLib.getDocument({ url: pdfSource });
+        } else {
+          console.error("Invalid pdfSource:", pdfSource);
+          setError("Invalid PDF source provided");
+          setIsLoading(false);
+          return;
         }
 
         const pdf = await loadingTask.promise;
@@ -193,6 +197,7 @@ function PDFViewerWrapper({
         pdfDocumentRef.current.destroy();
         pdfDocumentRef.current = null;
       }
+      // No cleanup needed - File objects do not require revocation
       renderTaskRef.current.forEach((task) => task.cancel());
       renderTaskRef.current.clear();
     };
@@ -608,8 +613,8 @@ function PDFViewerWrapper({
                     height: pageMetadata.reduce((sum, meta) => sum + meta.height + 16, 0),
                   }}
                 >
-                  {/* Use new API if boundingBoxes and selectedIndexes are provided */}
-                  {boundingBoxes && selectedIndexes.length > 0 ? (
+                  {/* Use new API if boundingBoxes is provided */}
+                  {boundingBoxes ? (
                     <HighlightOverlay
                       boundingBoxes={boundingBoxes}
                       selectedIndexes={selectedIndexes}
