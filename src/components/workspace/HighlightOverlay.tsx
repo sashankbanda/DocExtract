@@ -1,33 +1,26 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { BoundingBox } from "@/types/document";
-import { useCallback, useMemo, useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
 
 interface HighlightOverlayProps {
-  // New API: word index-based highlighting
-  // NOTE: Backend generates word-level boxes from line-level boxes returned by LLMWhisperer
-  // We highlight only the specific word_indexes for each field (not entire lines)
-  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains word-level boxes)
-  selectedIndexes?: number[]; // Word indexes to highlight (0-based) - for preview/hover
-  pdfPageRefs?: React.RefObject<HTMLCanvasElement>[]; // Array of page canvas refs
-  currentScale?: number; // Current zoom scale
+  boundingBoxes?: Record<string, unknown> | null;
+  selectedLineIndexes?: number[];
+  currentScale?: number;
   pageMetadata?: Array<{
     pageNumber: number;
     width: number;
     height: number;
     viewport: { width: number; height: number };
     scale: number;
-  }>; // Page metadata for positioning
-  activeHighlightId?: string | null; // ID of the active highlight (clicked) - triggers highlight even if selectedIndexes is empty
-  onHighlightClick?: (highlight: MergedHighlight) => void; // Callback when highlight is clicked
-  scrollContainerRef?: React.RefObject<HTMLDivElement>; // Container ref for scrolling
-  pagesLoaded?: boolean; // Whether PDF pages are fully loaded
-  // Legacy API: direct bounding box highlighting (backward compatibility)
-  highlights?: BoundingBox[]; // Pre-positioned highlights
-  activeHighlight?: BoundingBox | null; // Active highlight
-  scale?: number; // Scale for legacy highlights
+  }>;
+  activeHighlightId?: string | null;
+  pagesLoaded?: boolean;
+  highlights?: BoundingBox[];
+  activeHighlight?: BoundingBox | null;
+  scale?: number;
 }
 
-interface MergedHighlight {
+interface LineHighlight {
   id: string;
   x: number;
   y: number;
@@ -36,240 +29,31 @@ interface MergedHighlight {
   page: number;
 }
 
-// Check if two boxes overlap or touch
-function boxesOverlap(
-  box1: { x: number; y: number; width: number; height: number },
-  box2: { x: number; y: number; width: number; height: number },
-  gapRatio: number = 0.5
-): boolean {
-  const gap = Math.min(box1.height, box2.height) * gapRatio;
-  
-  // Check horizontal overlap
-  const horizontalOverlap =
-    box1.x <= box2.x + box2.width + gap && box1.x + box1.width + gap >= box2.x;
-  
-  // Check vertical overlap (for same line)
-  const verticalOverlap =
-    Math.abs(box1.y - box2.y) <= Math.max(box1.height, box2.height) * 0.6;
-  
-  return horizontalOverlap && verticalOverlap;
-}
-
-// Merge overlapping boxes
-function mergeBoxes(boxes: Array<{ x: number; y: number; width: number; height: number; page: number }>): MergedHighlight[] {
-  if (boxes.length === 0) return [];
-
-  // Group boxes by page
-  const boxesByPage = new Map<number, Array<{ x: number; y: number; width: number; height: number }>>();
-  boxes.forEach((box) => {
-    if (!boxesByPage.has(box.page)) {
-      boxesByPage.set(box.page, []);
-    }
-    boxesByPage.get(box.page)!.push({ x: box.x, y: box.y, width: box.width, height: box.height });
-  });
-
-  const merged: MergedHighlight[] = [];
-
-  // Process each page independently
-  boxesByPage.forEach((pageBoxes, page) => {
-    // Sort boxes by x position, then y position
-    const sorted = [...pageBoxes].sort((a, b) => {
-      if (Math.abs(a.y - b.y) > Math.max(a.height, b.height) * 0.6) {
-        return a.y - b.y; // Different lines
-      }
-      return a.x - b.x; // Same line
-    });
-
-    const mergedForPage: MergedHighlight[] = [];
-    const processed = new Set<number>();
-
-    for (let i = 0; i < sorted.length; i++) {
-      if (processed.has(i)) continue;
-
-      let currentBox = { ...sorted[i] };
-      processed.add(i);
-
-      // Try to merge with other boxes
-      let mergedAny = true;
-      while (mergedAny) {
-        mergedAny = false;
-        for (let j = i + 1; j < sorted.length; j++) {
-          if (processed.has(j)) continue;
-
-          if (boxesOverlap(currentBox, sorted[j])) {
-            // Merge boxes
-            const minX = Math.min(currentBox.x, sorted[j].x);
-            const minY = Math.min(currentBox.y, sorted[j].y);
-            const maxX = Math.max(
-              currentBox.x + currentBox.width,
-              sorted[j].x + sorted[j].width
-            );
-            const maxY = Math.max(
-              currentBox.y + currentBox.height,
-              sorted[j].y + sorted[j].height
-            );
-
-            currentBox = {
-              x: minX,
-              y: minY,
-              width: maxX - minX,
-              height: maxY - minY,
-            };
-            processed.add(j);
-            mergedAny = true;
-          }
-        }
-      }
-
-      mergedForPage.push({
-        id: `page-${page}-highlight-${mergedForPage.length}`,
-        ...currentBox,
-        page,
-      });
-    }
-
-    merged.push(...mergedForPage);
-  });
-
-  return merged;
-}
-
-// Build index lookup from bounding box payload
-function buildIndexLookup(boundingBoxes: Record<string, unknown>): Map<number, BoundingBox> {
-  const lookup = new Map<number, BoundingBox>();
-
-  if (!boundingBoxes) return lookup;
-
-  // Try to extract words from different possible structures
-  const words = (boundingBoxes.words as any[]) || [];
-  const pages = (boundingBoxes.pages as any[]) || [];
-
-  // Process words array
-  words.forEach((word: any) => {
-    if (!word || typeof word !== "object") return;
-    const index = word.index;
-    if (typeof index !== "number") return;
-
-    const bbox = word.bbox || word.bounding_box || {};
-    if (!bbox || typeof bbox !== "object") return;
-
-    const page = word.page || 1;
-    const x1 = bbox.x1 ?? bbox.x ?? bbox.left ?? 0;
-    const y1 = bbox.y1 ?? bbox.y ?? bbox.top ?? 0;
-    const x2 = bbox.x2 ?? bbox.right ?? x1 + (bbox.width ?? 0);
-    const y2 = bbox.y2 ?? bbox.bottom ?? y1 + (bbox.height ?? 0);
-
-    lookup.set(index, {
-      x: Math.min(x1, x2),
-      y: Math.min(y1, y2),
-      width: Math.abs(x2 - x1),
-      height: Math.abs(y2 - y1),
-      page: typeof page === "number" ? page : 1,
-    });
-  });
-
-  // Process pages array
-  pages.forEach((page: any) => {
-    const pageNum = page.page ?? page.index ?? 1;
-    const pageWords = page.words || [];
-    pageWords.forEach((word: any) => {
-      if (!word || typeof word !== "object") return;
-      const index = word.index;
-      if (typeof index !== "number") return;
-
-      const bbox = word.bbox || word.bounding_box || {};
-      if (!bbox || typeof bbox !== "object") return;
-
-      const x1 = bbox.x1 ?? bbox.x ?? bbox.left ?? 0;
-      const y1 = bbox.y1 ?? bbox.y ?? bbox.top ?? 0;
-      const x2 = bbox.x2 ?? bbox.right ?? x1 + (bbox.width ?? 0);
-      const y2 = bbox.y2 ?? bbox.bottom ?? y1 + (bbox.height ?? 0);
-
-      lookup.set(index, {
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        width: Math.abs(x2 - x1),
-        height: Math.abs(y2 - y1),
-        page: typeof pageNum === "number" ? pageNum : 1,
-      });
-    });
-  });
-
-  return lookup;
-}
-
 export function HighlightOverlay({
   boundingBoxes,
-  selectedIndexes = [],
-  pdfPageRefs = [],
+  selectedLineIndexes = [],
   currentScale = 1,
   pageMetadata = [],
   activeHighlightId = null,
-  onHighlightClick,
-  scrollContainerRef,
   pagesLoaded = true,
-  // Legacy API
   highlights,
   activeHighlight,
   scale = 1,
 }: HighlightOverlayProps) {
-  const glowTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [clickedHighlightId, setClickedHighlightId] = useState<string | null>(null);
-  const [pulseHighlightId, setPulseHighlightId] = useState<string | null>(null);
-
-  // Determine which API to use - use new API if boundingBoxes is provided
-  const useNewAPI = boundingBoxes !== undefined;
-
-  // Convert word indexes to bounding boxes
-  // Backend generates word-level boxes: boundingBoxes.words[wordIndex] = {page, x, y, width, height}
-  const wordIndexesToBoxes = useMemo(() => {
-    if (!useNewAPI || !boundingBoxes) return [];
-
-    // Build lookup from word-level boxes
-    const lookup = buildIndexLookup(boundingBoxes);
-    const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
-
-    // Get word indexes to highlight (from selectedIndexes or activeHighlightId)
-    const indexesToHighlight = selectedIndexes.length > 0 
-      ? selectedIndexes 
-      : []; // Will be handled by active highlights
-
-    const uniqueIndexes = Array.from(new Set(indexesToHighlight));
-
-    uniqueIndexes.forEach((index) => {
-      const box = lookup.get(index);
-      if (box) {
-        boxes.push(box);
-      }
-    });
-
-    return boxes;
-  }, [useNewAPI, boundingBoxes, selectedIndexes]);
-
-  // Merge overlapping boxes (new API)
-  // Only merge boxes that are on the same line and close together
-  const mergedHighlights = useMemo(() => {
-    if (!useNewAPI) return [];
-    return mergeBoxes(wordIndexesToBoxes);
-  }, [useNewAPI, wordIndexesToBoxes]);
-
-  // Calculate page offsets for positioning (new API)
   const pageOffsets = useMemo(() => {
-    if (!useNewAPI || !pageMetadata.length) return [];
+    if (!pageMetadata.length) return [];
     const offsets: number[] = [0];
     let currentOffset = 0;
     for (let i = 0; i < pageMetadata.length; i++) {
-      currentOffset += pageMetadata[i].height + 16; // 16px margin between pages
+      currentOffset += pageMetadata[i].height + 16; // match PDF viewer margin
       offsets.push(currentOffset);
     }
     return offsets;
-  }, [useNewAPI, pageMetadata]);
+  }, [pageMetadata]);
 
-  // Position highlights accounting for scale and page offsets (new API)
-  // Fix Y-axis coordinate conversion: y_html = pageHeight - y_pdf - height
-  const positionedHighlights = useMemo(() => {
-    if (!useNewAPI) {
-      // Legacy API: use pre-positioned highlights
+  const positionedHighlights = useMemo<LineHighlight[]>(() => {
+    // Legacy path
+    if (!boundingBoxes) {
       return (highlights || []).map((h, idx) => ({
         id: `legacy-${idx}`,
         x: h.x * scale,
@@ -280,164 +64,72 @@ export function HighlightOverlay({
       }));
     }
 
-    return mergedHighlights.map((highlight) => {
-      const pageIndex = highlight.page - 1;
-      const pageMeta = pageMetadata[pageIndex];
-      if (!pageMeta) return highlight;
+    const lines = ((boundingBoxes as any).line_metadata || (boundingBoxes as any).lines || []) as any[];
+    if (!Array.isArray(lines) || selectedLineIndexes.length === 0) return [];
 
-      const pageOffset = pageOffsets[pageIndex] || 0;
-      const pageHeight = pageMeta.height;
+    const uniqueIndexes = Array.from(new Set(selectedLineIndexes));
+    const boxes: LineHighlight[] = [];
 
-      // PDF.js uses bottom-left origin, HTML uses top-left
-      // Convert Y coordinate: y_pdf = pageHeight - y_html - height
-      // So: y_html = pageHeight - y_pdf - height
-      const flippedY = pageHeight - highlight.y - highlight.height;
+    uniqueIndexes.forEach((lineIdx) => {
+      const entry =
+        lines.find((item: any) => {
+          const ln = item?.line_number ?? item?.line_no ?? item?.line;
+          return Number(ln) === Number(lineIdx);
+        }) || null;
 
-      return {
-        ...highlight,
-        x: highlight.x * currentScale,
-        y: flippedY * currentScale + pageOffset,
-        width: highlight.width * currentScale,
-        height: highlight.height * currentScale,
-      };
+      const rawBox = entry?.raw_box || entry?.raw || entry?.bbox || entry?.box;
+      if (!entry || !Array.isArray(rawBox) || rawBox.length < 4) return;
+
+      const page = Number(entry.page ?? rawBox[0] ?? 1);
+      const pageMeta = pageMetadata[page - 1];
+      if (!pageMeta) return;
+
+      const baseY = Number(rawBox[1]);
+      const rawHeight = Number(rawBox[2]);
+      const pageHeightSource = Number(entry.page_height ?? entry.pageHeight ?? rawBox[3] ?? pageMeta.height);
+
+      if (!pageHeightSource || rawHeight <= 0) return;
+
+      const scaleFactor = pageMeta.height / pageHeightSource;
+      const pageOffset = pageOffsets[page - 1] || 0;
+      const yHtml = pageHeightSource - (baseY + rawHeight);
+
+      boxes.push({
+        id: `line-${lineIdx}`,
+        page,
+        x: 0,
+        y: yHtml * scaleFactor + pageOffset,
+        width: pageMeta.width,
+        height: rawHeight * scaleFactor,
+      });
     });
-  }, [useNewAPI, mergedHighlights, currentScale, pageOffsets, pageMetadata, highlights, scale]);
 
-  // Handle highlight click - scroll to page and show glow
-  const handleHighlightClick = useCallback(
-    (highlight: MergedHighlight) => {
-      // Clear any existing glow timeout
-      if (glowTimeoutRef.current) {
-        clearTimeout(glowTimeoutRef.current);
-      }
+    return boxes;
+  }, [boundingBoxes, selectedLineIndexes, pageMetadata, pageOffsets, currentScale, highlights, scale]);
 
-      // Set clicked highlight for glow effect
-      setClickedHighlightId(highlight.id);
-      setPulseHighlightId(highlight.id);
+  const legacyActiveHighlights = useMemo<LineHighlight[]>(() => {
+    if (!activeHighlight) return [];
+    return [
+      {
+        id: "legacy-active",
+        x: activeHighlight.x * scale,
+        y: activeHighlight.y * scale,
+        width: activeHighlight.width * scale,
+        height: activeHighlight.height * scale,
+        page: activeHighlight.page || 1,
+      },
+    ];
+  }, [activeHighlight, scale]);
 
-      // Clear pulse after 1 second, glow stays longer
-      setTimeout(() => {
-        setPulseHighlightId(null);
-      }, 1000);
-
-      // Clear glow after 2 seconds
-      glowTimeoutRef.current = setTimeout(() => {
-        setClickedHighlightId(null);
-      }, 2000);
-
-      // Scroll to page if using new API
-      if (useNewAPI && scrollContainerRef?.current && pageMetadata.length) {
-        const pageIndex = highlight.page - 1;
-        const pageOffset = pageOffsets[pageIndex] || 0;
-
-        // Scroll to the highlight
-        const container = scrollContainerRef.current;
-        const scrollY = pageOffset + highlight.y - 150; // 150px offset from top
-        container.scrollTo({
-          top: Math.max(0, scrollY),
-          behavior: "smooth",
-        });
-      }
-
-      // Call the callback if provided
-      if (onHighlightClick) {
-        onHighlightClick(highlight);
-      }
-    },
-    [useNewAPI, scrollContainerRef, pageMetadata, pageOffsets, onHighlightClick]
-  );
-
-  // Determine active highlight ID (new API) or use legacy activeHighlight
-  // Render highlights even when selectedIndexes is empty but activeHighlightId is set
-  const effectiveActiveHighlightId = useMemo(() => {
-    // Clicked highlight takes precedence
-    if (clickedHighlightId) return clickedHighlightId;
-    
-    if (useNewAPI) {
-      // If activeHighlightId is set, show active highlights (even if selectedIndexes is empty)
-      if (activeHighlightId) {
-        return activeHighlightId;
-      }
-      return null;
-    }
-    // Legacy API: check if any highlight matches activeHighlight
-    if (!activeHighlight) return null;
-    const matchingIndex = positionedHighlights.findIndex(
-      (h) =>
-        Math.abs(h.x - activeHighlight.x * scale) < 1 &&
-        Math.abs(h.y - activeHighlight.y * scale) < 1 &&
-        Math.abs(h.width - activeHighlight.width * scale) < 1 &&
-        Math.abs(h.height - activeHighlight.height * scale) < 1
-    );
-    return matchingIndex >= 0 ? positionedHighlights[matchingIndex].id : null;
-  }, [clickedHighlightId, useNewAPI, activeHighlightId, activeHighlight, positionedHighlights, scale]);
-
-  // Clear glow timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (glowTimeoutRef.current) {
-        clearTimeout(glowTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Don't render if pages aren't loaded
   if (!pagesLoaded) {
     return null;
   }
 
-  // Separate preview (hover) and active (clicked) highlights
-  const previewHighlights = useMemo(() => {
-    // Preview highlights are from selectedIndexes (hover state) - exclude active highlights
-    if (!useNewAPI || !boundingBoxes || !selectedIndexes || selectedIndexes.length === 0) return [];
-    if (effectiveActiveHighlightId) return []; // Don't show preview when active highlight is shown
-    
-    const lookup = buildIndexLookup(boundingBoxes);
-    const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
-    const uniqueIndexes = Array.from(new Set(selectedIndexes));
-    
-    uniqueIndexes.forEach((index) => {
-      const box = lookup.get(index);
-      if (box) {
-        boxes.push(box);
-      }
-    });
-    
-    const merged = mergeBoxes(boxes);
-    return merged.map((highlight) => {
-      const pageIndex = highlight.page - 1;
-      const pageMeta = pageMetadata[pageIndex];
-      if (!pageMeta) return highlight;
-
-      const pageOffset = pageOffsets[pageIndex] || 0;
-      const pageHeight = pageMeta.height;
-
-      // Fix Y-axis coordinate conversion: y_html = pageHeight - y_pdf - height
-      const flippedY = pageHeight - highlight.y - highlight.height;
-
-      return {
-        ...highlight,
-        x: highlight.x * currentScale,
-        y: flippedY * currentScale + pageOffset,
-        width: highlight.width * currentScale,
-        height: highlight.height * currentScale,
-      };
-    });
-  }, [useNewAPI, boundingBoxes, selectedIndexes, currentScale, pageOffsets, pageMetadata, effectiveActiveHighlightId]);
-
-  const activeHighlights = useMemo(() => {
-    // Active highlights are shown when activeHighlightId is set
-    // Render highlights even when selectedIndexes is empty but activeHighlightId is set
-    if (!effectiveActiveHighlightId) return [];
-    
-    // Return all positioned highlights when active
-    // These are based on selectedIndexes which are set when a field is clicked
-    return positionedHighlights;
-  }, [positionedHighlights, effectiveActiveHighlightId]);
+  const previewHighlights = activeHighlightId ? [] : positionedHighlights;
+  const activeHighlights = activeHighlightId ? positionedHighlights : legacyActiveHighlights;
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      {/* Preview layer (hover highlights) - subtle */}
       <AnimatePresence>
         {previewHighlights.map((highlight) => (
           <motion.div
@@ -457,70 +149,21 @@ export function HighlightOverlay({
         ))}
       </AnimatePresence>
 
-      {/* Active layer (clicked highlights) - prominent with glow */}
-      {activeHighlights.map((highlight) => {
-        const isActive = effectiveActiveHighlightId !== null;
-        const isPulsing = pulseHighlightId === highlight.id;
-
-        return (
-          <motion.div
-            key={`active-${highlight.id}`}
-            className="absolute bg-blue-500/30 border-2 border-blue-500 rounded-md pointer-events-auto cursor-pointer z-10"
-            style={{
-              left: highlight.x,
-              top: highlight.y,
-              width: highlight.width,
-              height: highlight.height,
-            }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ 
-              opacity: 1, 
-              scale: 1,
-            }}
-            transition={{ duration: 0.3 }}
-            onClick={() => handleHighlightClick(highlight)}
-            whileHover={{ opacity: 0.9 }}
-          >
-            {/* Pulse animation for clicked highlight */}
-            <AnimatePresence>
-              {isPulsing && (
-                <motion.div
-                  className="absolute -inset-1 bg-blue-500/50 rounded-lg pointer-events-none"
-                  initial={{ opacity: 0, scale: 1 }}
-                  animate={{ 
-                    opacity: [0, 0.8, 0],
-                    scale: [1, 1.1, 1],
-                  }}
-                  exit={{ opacity: 0 }}
-                  transition={{
-                    duration: 1,
-                    ease: "easeOut",
-                  }}
-                />
-              )}
-            </AnimatePresence>
-
-            {/* Glow effect for active highlight */}
-            <AnimatePresence>
-              {isActive && (
-                <motion.div
-                  className="absolute -inset-2 bg-blue-500/40 rounded-lg blur-md pointer-events-none"
-                  initial={{ opacity: 0 }}
-                  animate={{
-                    opacity: [0.5, 0.8, 0.5],
-                  }}
-                  exit={{ opacity: 0 }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                />
-              )}
-            </AnimatePresence>
-          </motion.div>
-        );
-      })}
+      {activeHighlights.map((highlight) => (
+        <motion.div
+          key={`active-${highlight.id}`}
+          className="absolute bg-blue-500/30 border-2 border-blue-500 rounded-md pointer-events-none z-10"
+          style={{
+            left: highlight.x,
+            top: highlight.y,
+            width: highlight.width,
+            height: highlight.height,
+          }}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        />
+      ))}
     </div>
   );
 }

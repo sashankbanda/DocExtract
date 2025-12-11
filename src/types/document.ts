@@ -1,6 +1,6 @@
 export interface StructuredFieldData {
   value: string | null;
-  word_indexes: number[]; // Word indexes for highlighting (0-based)
+  line_indexes: number[]; // Line indexes for highlighting (1-based)
 }
 
 export interface UploadFile {
@@ -36,7 +36,7 @@ export interface ExtractedField {
   value: string;
   confidence: number;
   boundingBox?: BoundingBox;
-  wordIndexes?: number[];
+  lineIndexes?: number[];
 }
 
 export interface TableCell {

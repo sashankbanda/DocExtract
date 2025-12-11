@@ -12,13 +12,18 @@ Run As Of: 09/1/3024 20:50:36 AM
 
            Expiration Date: 10/31/3021 
 
- Claim Number Policy Number    Loss Date Notification Date Claim Status Claimant          Claim Description         Coverage Section Cause of Loss Paid Loss Paid ALAE Total Paid 
+                                          Notification                                                              Coverage 
+ Claim Number Policy Number    Loss Date              Claim Status Claimant               Claim Description                      Cause of Loss   Paid Loss Paid ALAE Total Paid 
+                                             Date                                                                    Section 
 
-01000225      ABC1223          04/20/3020 05/06/3020 CLOSE        Ajith Kumar   claim known description abou this loss is not EPL Some cause      $56.00        $0.00 $56.00 
+                                                                                claim description abou this loss is not 
+01000225      ABC1223          04/20/3020 05/06/3020 CLOSE        Ajith Kumar                                          EPL    Some cause          $56.00        $0.00 $56.00 
+                                                                                known 
 
                                                                                 claim description this loss is known 
                                                                                 but dont know how to type here. How 
-01001426      Ab2432          06/23/3021 07/01/3021    CLOSE     Surya anna     are you? Thanks I'm fine. Type still   EPL    Some cause             $0.00      $0.00     $0.00 
+                                                                 Surya anna 
+01001426      Ab2432          06/23/3021 07/01/3021    CLOSE                    are you? Thanks I'm fine. Type still   EPL    Some cause             $0.00      $0.00     $0.00 
                                                                                 this box gets full. I dont know what to 
                                                                                 type 
 
@@ -27,8 +32,8 @@ Run As Of: 09/1/3024 20:50:36 AM
                                                                                 celebration 
 
                                                                                 ** impotant dont disclose this description 
-
-01003040      DFD543454       06/27/3022 06/28/3022    OPEN      Rajni          to anyone keep it secret okay.         EPL    some cause             $0.00      $0.00     $0.00 
+                                                                                to anyone keep it secret okay. 
+01003040      DFD543454       06/27/3022 06/28/3022    OPEN      Rajni                                                 EPL    some cause             $0.00      $0.00     $0.00 
 
  Total # Claims:           4                                                                                                              Totals: $56.00        $0.00 $56.00 
 

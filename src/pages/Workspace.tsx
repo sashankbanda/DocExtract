@@ -31,7 +31,7 @@ export default function Workspace() {
   const [activeTab, setActiveTab] = useState<TabType>("text");
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
-  const [selectedWordIndexes, setSelectedWordIndexes] = useState<number[]>([]);
+  const [selectedLineIndexes, setSelectedLineIndexes] = useState<number[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const [isSwitchingFile, setIsSwitchingFile] = useState(false);
   const pdfViewerRef = useRef<PDFViewerRef>(null);
@@ -53,7 +53,7 @@ export default function Workspace() {
         setIsSwitchingFile(true);
         setSelectedFile(doc);
         // Reset highlights
-        setSelectedWordIndexes([]);
+        setSelectedLineIndexes([]);
         setActiveHighlightId(null);
         setHoveredBoundingBox(null);
         setActiveBoundingBox(null);
@@ -71,20 +71,18 @@ export default function Workspace() {
   }, [documents, selectedFileId, selectedFile]);
 
 
-  // Handle word index highlighting
-  // NOTE: We use word_indexes for highlighting. The backend generates word-level boxes
-  // from line-level boxes returned by LLMWhisperer.
-  const handleWordIndexHover = useCallback((wordIndexes: number[] | null) => {
-    setSelectedWordIndexes(wordIndexes || []);
+  // Handle line index highlighting
+  const handleLineHover = useCallback((lineIndexes: number[] | null) => {
+    setSelectedLineIndexes(lineIndexes || []);
   }, []);
 
-  const handleWordIndexClick = useCallback((wordIndexes: number[]) => {
-    setSelectedWordIndexes(wordIndexes);
+  const handleLineClick = useCallback((lineIndexes: number[]) => {
+    setSelectedLineIndexes(lineIndexes);
     setActiveHighlightId(`highlight-${Date.now()}`);
     
     // Scroll to highlight
-    if (pdfViewerRef.current && wordIndexes.length > 0) {
-      pdfViewerRef.current.scrollToHighlight(wordIndexes);
+    if (pdfViewerRef.current && lineIndexes.length > 0) {
+      pdfViewerRef.current.scrollToHighlight(lineIndexes);
     }
     
     setTimeout(() => setActiveHighlightId(null), 2000);
@@ -159,8 +157,8 @@ export default function Workspace() {
         return selectedDocument ? (
           <ExtractedTextPanel
             document={selectedDocument}
-            onLineClick={handleWordIndexClick}
-            onLineHover={handleWordIndexHover}
+            onLineClick={handleLineClick}
+            onLineHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
         ) : (
@@ -170,8 +168,8 @@ export default function Workspace() {
         return (
           <StructuredTablePanel
             structuredFields={selectedDocument?.structuredFields}
-            onFieldClick={handleWordIndexClick}
-            onFieldHover={handleWordIndexHover}
+            onFieldClick={handleLineClick}
+            onFieldHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
         );
@@ -179,8 +177,8 @@ export default function Workspace() {
         return (
           <TemplateFieldsPanel
             structuredFields={selectedDocument?.structuredFields}
-            onFieldClick={handleWordIndexClick}
-            onFieldHover={handleWordIndexHover}
+            onFieldClick={handleLineClick}
+            onFieldHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
         );
@@ -216,7 +214,7 @@ export default function Workspace() {
             fileName={selectedDocument?.fileName}
             pdfSource={selectedDocument?.rawFile || null}
             boundingBoxes={selectedDocument?.boundingBoxes}
-            selectedIndexes={selectedWordIndexes}
+            selectedLineIndexes={selectedLineIndexes}
             activeHighlightId={activeHighlightId}
             highlights={allHighlights}
             activeHighlight={activeBoundingBox}

@@ -30,9 +30,9 @@ async def upload_files(files: List[UploadFile] = File(...)) -> List[UploadRespon
     
     Accepts form-data with multiple files and processes them through LLMWhisperer.
     Each file is processed with:
-    - output_mode: "layout_preserving"
-    - add_line_nos: True
-    - wait_for_completion: True (via polling)
+    - output_mode: "highlight_preserving"
+    - add_line_nos: False
+    - wait_for_completion: True
     
     Returns an array of extraction results with:
     - fileName: Original filename

@@ -2,19 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List
 
 from services.groq_service import GroqService
 
 logger = logging.getLogger(__name__)
 
-MERGE_GAP_RATIO = 0.5
-LINE_ALIGNMENT_RATIO = 0.6
-
-# Load standard template at module import
 _TEMPLATE_CACHE: Dict[str, Dict[str, Any]] = {}
 _TEMPLATE_DIR = Path(__file__).parent.parent
 
@@ -38,77 +32,38 @@ def _load_template(template_name: str = "standard_template") -> Dict[str, Any]:
         raise ValueError(f"Invalid JSON in template file {template_path}: {exc}") from exc
 
 
-# Load standard template at module import
 STANDARD_TEMPLATE = _load_template("standard_template")
 
 
 def normalize_bounding_boxes(boxes: Dict[str, Any] | List[Any] | None) -> Dict[str, Any]:
-    """
-    Normalize bounding boxes to a consistent dictionary format.
-
-    Args:
-        boxes: Bounding boxes as dict, list, or None
-
-    Returns:
-        Normalized dictionary with string keys
-    """
+    """Normalize bounding boxes to a dict focused on line metadata."""
     if boxes is None:
         return {}
-    
+
     if isinstance(boxes, list):
-        # Convert list to dict with numeric string keys
-        return {str(i): box for i, box in enumerate(boxes)}
-    
+        return {"line_metadata": boxes}
+
     if isinstance(boxes, dict):
         return boxes
-    
-    # Fallback: return empty dict for unexpected types
+
     logger.warning(f"Unexpected bounding boxes type: {type(boxes)}, returning empty dict")
     return {}
 
 
 async def extract_fields_from_text(
-    text: str, bounding_boxes: Dict[str, Any], template: Dict[str, Any]
+    text: str, bounding_boxes: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Extract fields from layout-preserving text using LLM.
-
-    NOTE: We no longer extract start/end from Groq. Groq only extracts VALUES.
-    Word index mapping is done backend-side using LLMWhisperer highlight data.
-    LLMWhisperer returns line-level bounding boxes, not word-level, so we map
-    word_indexes to line_numbers for line-level highlighting.
-
-    Args:
-        text: Full layout-preserving text from LLMWhisperer
-        bounding_boxes: Dictionary containing line_metadata (line-level bounding boxes)
-        template: Template dictionary with field keys
-
-    Returns:
-        Dictionary with 'fields' key containing extracted field data:
-        {
-            "fields": {
-                "field_key": {
-                    "value": "...",
-                    "word_indexes": [int, ...],
-                    "line_numbers": [int, ...]  # Line numbers for highlighting
-                }
-            }
-        }
-    """
+    """Extract fields using LLM and map values to line indexes."""
     if not text or not text.strip():
         logger.warning("Empty text provided for extraction")
-        return {"fields": _create_empty_fields(template)}
+        return {"fields": _create_empty_fields(STANDARD_TEMPLATE)}
 
-    # Handle empty or invalid bounding boxes gracefully
     if not bounding_boxes or not isinstance(bounding_boxes, dict):
-        logger.warning("Invalid or empty bounding boxes provided, extraction will proceed without word indexes")
+        logger.warning("Invalid or empty bounding boxes provided, extraction will proceed without line indexes")
         bounding_boxes = {}
 
-    # Build LLM prompt - only extract values, no positional metadata
-    # Word index mapping will be done backend-side using LLMWhisperer highlight data
-    prompt = _build_extraction_prompt(text, template)
+    prompt = _build_extraction_prompt(text, STANDARD_TEMPLATE)
 
-    # Call Groq service
     groq_service = GroqService()
     max_retries = 2
     llm_response = None
@@ -120,62 +75,33 @@ async def extract_fields_from_text(
         except Exception as exc:
             if attempt == max_retries - 1:
                 logger.error(f"Failed to get LLM response after {max_retries} attempts: {exc}")
-                return {"fields": _create_empty_fields(template)}
+                return {"fields": _create_empty_fields(STANDARD_TEMPLATE)}
             logger.warning(f"LLM request failed (attempt {attempt + 1}), retrying...")
 
     if not llm_response:
-        return {"fields": _create_empty_fields(template)}
+        return {"fields": _create_empty_fields(STANDARD_TEMPLATE)}
 
-    # Parse LLM JSON response - only expects value (no word_indexes from Groq)
-    parsed_response = _parse_llm_response(llm_response, template)
+    parsed_response = _parse_llm_response(llm_response, STANDARD_TEMPLATE)
+    line_metadata = _extract_line_metadata(bounding_boxes)
 
-    # Map field values to word indexes using exact string matching
-    # Use bounding_boxes.words if available (more reliable than tokenized text)
-    words_list = []
-    if isinstance(bounding_boxes, dict):
-        words = bounding_boxes.get("words") or []
-        if isinstance(words, list):
-            # Build ordered list of word texts from bounding_boxes.words
-            words_list = [word.get("text", "").strip() if isinstance(word, dict) else str(word).strip() for word in words]
-    
-    # Fallback to tokenized text if words not available
-    if not words_list:
-        # Remove hex line numbers and split
-        import re
-        text_clean = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', text)
-        words_list = text_clean.split()
-        logger.warning("Using fallback tokenized text for word matching (bounding_boxes.words not available)")
-    
-    result_fields = {}
+    result_fields: Dict[str, Dict[str, Any]] = {}
     for field_key, field_data in parsed_response.items():
         value = field_data.get("value")
-        if not value or value is None:
-            result_fields[field_key] = {
-                "value": "",
-                "word_indexes": [],
-            }
+        if value is None or value == "":
+            result_fields[field_key] = {"value": "", "line_indexes": []}
             continue
-        
-        # Find word indexes by exact string matching
-        # Use words from bounding_boxes.words if available, otherwise use tokenized text
-        word_indexes = _find_word_indexes_for_value_from_words(value, words_list, bounding_boxes)
-        
+
+        line_indexes = _find_line_indexes_for_value(str(value), line_metadata)
         result_fields[field_key] = {
             "value": str(value),
-            "word_indexes": word_indexes,
+            "line_indexes": line_indexes,
         }
 
     return {"fields": result_fields}
 
 
 def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
-    """
-    Build prompt for LLM extraction.
-    
-    NOTE: We only extract VALUES, not word_indexes.
-    Word index mapping is done backend-side using exact string matching.
-    This ensures precise word-level highlighting without relying on LLM positional guesses.
-    """
+    """Build prompt for LLM extraction (values only)."""
     template_keys = list(template.keys())
     template_keys_json = json.dumps(template_keys, indent=2)
 
@@ -199,7 +125,7 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
         "Rules:",
         "- Never invent fields not in the template.",
         "- If a value is not found, return value=null.",
-        "- Extract ONLY the value - do not compute word indexes or positions.",
+        "- Extract ONLY the value - no positions, offsets, or indexes.",
         "- Return the exact value as it appears in the text.",
         "- No explanations, no prose, only JSON.",
     ]
@@ -208,15 +134,9 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
 
 
 def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse LLM JSON response safely.
-    
-    NOTE: We only expect value and word_indexes, not start/end.
-    Positional metadata is no longer extracted from Groq.
-    """
+    """Parse LLM JSON response safely (values only)."""
     cleaned = response_text.strip()
 
-    # Remove markdown code blocks if present
     if cleaned.startswith("```"):
         parts = cleaned.split("```")
         for part in parts:
@@ -236,12 +156,10 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
         logger.error(f"LLM response is not a dictionary: {type(parsed)}")
         return _create_empty_fields(template)
 
-    # Validate and normalize response
     result = {}
     template_keys = set(template.keys())
 
     for field_key, field_data in parsed.items():
-        # Only include fields that are in the template
         if field_key not in template_keys:
             logger.warning(f"Ignoring field not in template: {field_key}")
             continue
@@ -251,12 +169,10 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
             result[field_key] = {"value": None}
             continue
 
-        # Extract value only (word_indexes determined backend-side)
         result[field_key] = {
             "value": field_data.get("value"),
         }
 
-    # Ensure all template fields are present
     for key in template_keys:
         if key not in result:
             result[key] = {"value": None}
@@ -264,114 +180,37 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
     return result
 
 
-def _find_word_indexes_for_value_from_words(
-    value: str, words_list: List[str], bounding_boxes: Dict[str, Any]
-) -> List[int]:
-    """
-    Find word indexes for a field value using exact string matching.
-    
-    Uses bounding_boxes.words if available (more reliable), otherwise uses words_list.
-    Handles multi-word values by finding consecutive word matches.
-    
-    Args:
-        value: The field value to find
-        words_list: List of word texts (from bounding_boxes.words or tokenized text)
-        bounding_boxes: Bounding box data (to get word indexes from words array)
-        
-    Returns:
-        List of word indexes (0-based) where the value appears
-    """
-    if not value or not words_list:
+def _find_line_indexes_for_value(value: str, line_metadata: List[Dict[str, Any]]) -> List[int]:
+    """Find line numbers whose text contains the given value (case-insensitive substring match)."""
+    if not value or not line_metadata:
         return []
-    
-    # Normalize value: strip whitespace, handle case-insensitive matching
-    value_normalized = value.strip()
-    value_words = value_normalized.split()
-    
-    if not value_words:
+
+    target = value.strip().lower()
+    if not target:
         return []
-    
-    # Normalize words_list (trim whitespace, preserve case for exact match)
-    normalized_words = [w.strip() for w in words_list]
-    
-    # Try exact match first (case-sensitive, then case-insensitive)
-    word_indexes = []
-    
-    # First pass: exact case-sensitive match
-    for i in range(len(normalized_words) - len(value_words) + 1):
-        match = True
-        for j, value_word in enumerate(value_words):
-            if i + j >= len(normalized_words):
-                match = False
-                break
-            if normalized_words[i + j] != value_word:
-                match = False
-                break
-        
-        if match:
-            # Found exact match - use indexes from bounding_boxes.words if available
-            if isinstance(bounding_boxes, dict):
-                words = bounding_boxes.get("words") or []
-                if isinstance(words, list) and i < len(words):
-                    # Get actual word indexes from bounding_boxes.words
-                    indexes = []
-                    for j in range(len(value_words)):
-                        if i + j < len(words):
-                            word_obj = words[i + j]
-                            if isinstance(word_obj, dict):
-                                word_idx = word_obj.get("index")
-                                if word_idx is not None:
-                                    indexes.append(int(word_idx))
-                    if indexes:
-                        return sorted(list(set(indexes)))
-            
-            # Fallback: use sequential indexes
-            word_indexes.extend(range(i, i + len(value_words)))
-            break
-    
-    # Second pass: case-insensitive match if exact match failed
-    if not word_indexes:
-        value_words_lower = [w.lower() for w in value_words]
-        normalized_words_lower = [w.lower() for w in normalized_words]
-        
-        for i in range(len(normalized_words_lower) - len(value_words_lower) + 1):
-            match = True
-            for j, value_word_lower in enumerate(value_words_lower):
-                if i + j >= len(normalized_words_lower):
-                    match = False
-                    break
-                # Remove punctuation for comparison
-                token_word = ''.join(c for c in normalized_words_lower[i + j] if c.isalnum() or c.isspace())
-                value_word_clean = ''.join(c for c in value_word_lower if c.isalnum() or c.isspace())
-                if token_word != value_word_clean:
-                    match = False
-                    break
-            
-            if match:
-                # Found fuzzy match - log warning
-                logger.warning(f"Fuzzy-match used for value '{value}' (case-insensitive/punctuation-normalized)")
-                
-                # Use indexes from bounding_boxes.words if available
-                if isinstance(bounding_boxes, dict):
-                    words = bounding_boxes.get("words") or []
-                    if isinstance(words, list) and i < len(words):
-                        indexes = []
-                        for j in range(len(value_words)):
-                            if i + j < len(words):
-                                word_obj = words[i + j]
-                                if isinstance(word_obj, dict):
-                                    word_idx = word_obj.get("index")
-                                    if word_idx is not None:
-                                        indexes.append(int(word_idx))
-                        if indexes:
-                            return sorted(list(set(indexes)))
-                
-                # Fallback: use sequential indexes
-                word_indexes.extend(range(i, i + len(value_words)))
-                break
-    
-    # Remove duplicates and sort
-    return sorted(list(set(word_indexes)))
+
+    matches: List[int] = []
+    for idx, entry in enumerate(line_metadata):
+        if not isinstance(entry, dict):
+            continue
+
+        line_number = entry.get("line_number") or entry.get("line_no") or entry.get("line") or (idx + 1)
+        text = entry.get("text") or ""
+        if not isinstance(text, str):
+            continue
+
+        if target in text.lower():
+            matches.append(int(line_number))
+
+    seen = set()
+    unique_matches = []
+    for line_num in matches:
+        if line_num in seen:
+            continue
+        seen.add(line_num)
+        unique_matches.append(line_num)
+
+    return unique_matches
 
 
 def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,271 +218,19 @@ def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
     return {
         key: {
             "value": "",
-            "word_indexes": [],
+            "line_indexes": [],
         }
         for key in template.keys()
     }
 
 
-def _find_word_indexes_for_value(value: str, tokenized_text: List[str]) -> List[int]:
-    """
-    Legacy function - kept for backward compatibility.
-    Use _find_word_indexes_for_value_from_words instead.
-    """
-    return _find_word_indexes_for_value_from_words(value, tokenized_text, {})
-
-
 def _extract_line_metadata(bounding_boxes: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Extract line metadata from bounding boxes.
-    
-    LLMWhisperer returns line_metadata which contains line-level bounding boxes,
-    not word-level. Each line has a line number and bounding box coordinates.
-    """
+    """Extract line metadata from bounding boxes."""
     if not bounding_boxes or not isinstance(bounding_boxes, dict):
         return []
-    
+
     line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
     if isinstance(line_metadata, list):
         return line_metadata
-    
+
     return []
-
-
-def map_word_indexes_to_line_numbers(
-    word_indexes: List[int], line_metadata: List[Dict[str, Any]], text: str
-) -> List[int]:
-    """
-    Map word indexes to line numbers.
-    
-    LLMWhisperer returns line-level bounding boxes, not word-level.
-    This function determines which line(s) contain the specified word indexes.
-    
-    Args:
-        word_indexes: List of word indexes (0-based, from splitting text on whitespace)
-        line_metadata: Line metadata from LLMWhisperer (contains line numbers and word ranges)
-        text: The full text (split by lines to match line numbers)
-        
-    Returns:
-        Sorted list of unique line numbers (1-based) that contain the word indexes
-    """
-    if not word_indexes or not line_metadata:
-        return []
-    
-    # Split text into words for indexing
-    words = text.split()
-    
-    # Build a mapping from word index to line number
-    # We need to determine which line each word belongs to
-    word_to_line: Dict[int, int] = {}
-    
-    # Process line metadata to find word ranges
-    for line_data in line_metadata:
-        if not isinstance(line_data, dict):
-            continue
-        
-        line_number = line_data.get("line_no") or line_data.get("line_number") or line_data.get("line")
-        if line_number is None:
-            continue
-        
-        # Try to find word range for this line
-        # LLMWhisperer may provide word_start and word_end, or we can infer from line position
-        word_start = line_data.get("word_start") or line_data.get("start_word_index")
-        word_end = line_data.get("word_end") or line_data.get("end_word_index")
-        
-        if word_start is not None and word_end is not None:
-            # Map all words in this range to this line
-            for word_idx in range(int(word_start), int(word_end) + 1):
-                word_to_line[word_idx] = int(line_number)
-        else:
-            # Fallback: try to match by line text
-            line_text = line_data.get("text", "")
-            if line_text:
-                # Find where this line's text appears in the full text
-                # This is approximate but better than nothing
-                line_words = line_text.split()
-                if line_words:
-                    # Try to find the first word of this line in the full word list
-                    first_word = line_words[0]
-                    for idx, word in enumerate(words):
-                        if word == first_word:
-                            # Map words of this line
-                            for i, _ in enumerate(line_words):
-                                if idx + i < len(words):
-                                    word_to_line[idx + i] = int(line_number)
-                            break
-    
-    # If we couldn't build word-to-line mapping, try alternative approach
-    if not word_to_line:
-        # Fallback: split text by lines and assign word indexes sequentially
-        lines = text.split("\n")
-        word_idx = 0
-        for line_num, line in enumerate(lines, start=1):
-            line_words = line.split()
-            for _ in line_words:
-                word_to_line[word_idx] = line_num
-                word_idx += 1
-    
-    # Map the requested word indexes to line numbers
-    line_numbers = set()
-    for word_idx in word_indexes:
-        if word_idx in word_to_line:
-            line_numbers.add(word_to_line[word_idx])
-    
-    return sorted(list(line_numbers))
-
-
-# Existing functions for bounding box merging (kept for backward compatibility)
-def merge_word_bounding_boxes(
-    *, word_indexes: Iterable[int], bounding_box_payload: Dict[str, Any]
-) -> List[Dict[str, float]]:
-    """Merge word bounding boxes for highlighting."""
-    if bounding_box_payload is None:
-        raise ValueError("boundingBoxes payload cannot be None.")
-
-    index_lookup = _build_index_lookup(bounding_box_payload)
-
-    unique_indexes: List[int] = []
-    seen = set()
-    for idx in word_indexes:
-        if idx in seen:
-            continue
-        seen.add(idx)
-        unique_indexes.append(int(idx))
-
-    if not unique_indexes:
-        raise ValueError("wordIndexes produced no unique indexes to map.")
-
-    selected_boxes: Dict[int, List[Dict[str, float]]] = defaultdict(list)
-
-    for idx in unique_indexes:
-        box = index_lookup.get(idx)
-        if not box:
-            raise ValueError(f"No bounding box found for word index {idx}.")
-        selected_boxes[int(box["page"])].append(box)
-
-    merged_results: List[Dict[str, float]] = []
-    for page, boxes in selected_boxes.items():
-        merged_results.extend(_merge_boxes_for_page(page, boxes))
-
-    return merged_results
-
-
-def _build_index_lookup(payload: Dict[str, Any]) -> Dict[int, Dict[str, float]]:
-    """Build lookup dictionary for word indexes to bounding boxes."""
-    lookup: Dict[int, Dict[str, float]] = {}
-
-    words = payload.get("words")
-    if isinstance(words, list):
-        for word in words:
-            _add_word_to_lookup(lookup, word)
-
-    pages = payload.get("pages")
-    if isinstance(pages, list):
-        for page in pages:
-            for word in page.get("words", []):
-                _add_word_to_lookup(lookup, word, default_page=page.get("page", page.get("index")))
-
-    if not lookup:
-        raise ValueError("Bounding box payload does not contain recognisable word data.")
-
-    return lookup
-
-
-def _add_word_to_lookup(
-    lookup: Dict[int, Dict[str, float]],
-    word_payload: Dict[str, Any],
-    default_page: Any = None,
-) -> None:
-    """Add a word to the lookup dictionary."""
-    if not isinstance(word_payload, dict):
-        return
-
-    index = word_payload.get("index")
-    if index is None:
-        return
-
-    bbox = word_payload.get("bbox") or word_payload.get("bounding_box") or {}
-    if not bbox:
-        return
-
-    page = word_payload.get("page", default_page)
-    if page is None:
-        return
-
-    x1, y1, x2, y2 = _normalise_box_coordinates(bbox)
-    lookup[int(index)] = {
-        "page": float(page),
-        "x": x1,
-        "y": y1,
-        "width": x2 - x1,
-        "height": y2 - y1,
-    }
-
-
-def _normalise_box_coordinates(bbox: Dict[str, Any]) -> Tuple[float, float, float, float]:
-    """Normalize bounding box coordinates to x1, y1, x2, y2 format."""
-    if {"x", "y", "width", "height"}.issubset(bbox):
-        x1 = float(bbox["x"])
-        y1 = float(bbox["y"])
-        return x1, y1, x1 + float(bbox["width"]), y1 + float(bbox["height"])
-
-    if {"left", "top", "right", "bottom"}.issubset(bbox):
-        return (
-            float(bbox["left"]),
-            float(bbox["top"]),
-            float(bbox["right"]),
-            float(bbox["bottom"]),
-        )
-
-    raise ValueError("Unsupported bounding box coordinate format.")
-
-
-def _merge_boxes_for_page(page: int, boxes: List[Dict[str, float]]) -> List[Dict[str, float]]:
-    """Merge bounding boxes for a single page."""
-    if not boxes:
-        return []
-
-    sorted_boxes = sorted(boxes, key=lambda b: (b["y"], b["x"]))
-    merged: List[Dict[str, float]] = []
-
-    for box in sorted_boxes:
-        if not merged:
-            merged.append({**box, "page": page})
-            continue
-
-        last = merged[-1]
-        if _boxes_should_merge(last, box):
-            merged[-1] = _merge_two_boxes(last, box)
-        else:
-            merged.append({**box, "page": page})
-
-    return merged
-
-
-def _boxes_should_merge(first: Dict[str, float], second: Dict[str, float]) -> bool:
-    """Check if two boxes should be merged."""
-    same_page = int(first["page"]) == int(second["page"])
-    if not same_page:
-        return False
-
-    vertical_overlap = abs(first["y"] - second["y"]) <= max(first["height"], second["height"]) * LINE_ALIGNMENT_RATIO
-    horizontal_gap = second["x"] - (first["x"] + first["width"])
-
-    return vertical_overlap and horizontal_gap <= max(first["width"], second["width"]) * MERGE_GAP_RATIO
-
-
-def _merge_two_boxes(first: Dict[str, float], second: Dict[str, float]) -> Dict[str, float]:
-    """Merge two bounding boxes into one."""
-    x1 = min(first["x"], second["x"])
-    y1 = min(first["y"], second["y"])
-    x2 = max(first["x"] + first["width"], second["x"] + second["width"])
-    y2 = max(first["y"] + first["height"], second["y"] + second["height"])
-
-    return {
-        "page": first["page"],
-        "x": x1,
-        "y": y1,
-        "width": x2 - x1,
-        "height": y2 - y1,
-    }

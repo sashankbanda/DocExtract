@@ -1,0 +1,268 @@
+{
+    "text": "\n\n                                                                                                           Loss Run - With Claimant \n\nRun As Of: 09/1/3024 20:50:36 AM \n\n            Insured Name: Gpt 40 mini \n\n            Policy Number: ABC123 \n\n            Effective Date: 10/31/3020 \n\n           Expiration Date: 10/31/3021 \n\n                                          Notification                                                              Coverage \n Claim Number Policy Number    Loss Date              Claim Status Claimant               Claim Description                      Cause of Loss   Paid Loss Paid ALAE Total Paid \n                                             Date                                                                    Section \n\n                                                                                claim description abou this loss is not \n01000225      ABC1223          04/20/3020 05/06/3020 CLOSE        Ajith Kumar                                          EPL    Some cause          $56.00        $0.00 $56.00 \n                                                                                known \n\n                                                                                claim description this loss is known \n                                                                                but dont know how to type here. How \n                                                                 Surya anna \n01001426      Ab2432          06/23/3021 07/01/3021    CLOSE                    are you? Thanks I'm fine. Type still   EPL    Some cause             $0.00      $0.00     $0.00 \n                                                                                this box gets full. I dont know what to \n                                                                                type \n\n                                                                                Hey gpt can you tell me how to write \n01001758      SDFDF3454       10/05/3021 10/05/3021    CLOSE     Vijay anna     an email to apply leave for Diwali     EPL    Some cause             $0.00      $0.00     $0.00 \n                                                                                celebration \n\n                                                                                ** impotant dont disclose this description \n                                                                                to anyone keep it secret okay. \n01003040      DFD543454       06/27/3022 06/28/3022    OPEN      Rajni                                                 EPL    some cause             $0.00      $0.00     $0.00 \n\n Total # Claims:           4                                                                                                              Totals: $56.00        $0.00 $56.00 \n\nSUMMARY OF POLICY PERIOD TOTALS \n\n           Insured:            Some insured in the world \n\n          Policy Period                    Policy #                # Claims                Paid \n\n10/31/3020 - 10/31/3021        dd6556782                                      1                   $6.00 \n\n10/31/3021 - 10/31/3022        asafal23374                                    1                      $0.00 \n\n10/31/3022 - 10/31/3023        dd69869869                                     1                      $0.00 \n\n10/31/3023 - 10/31/3024        dd9821498169                                   0                      $0.00 \n\n10/31/3024 - 10/31/3025        dd360536sd                                     0                      $0.00 \n\n                                               Total # of Claims:           44 \n<<<\f",
+    "fields": {
+        "lob": {
+            "value": "",
+            "line_indexes": []
+        },
+        "insured": {
+            "value": "Gpt 40 mini",
+            "line_indexes": []
+        },
+        "dba": {
+            "value": "",
+            "line_indexes": []
+        },
+        "policyNumber": {
+            "value": "ABC123",
+            "line_indexes": []
+        },
+        "effdate": {
+            "value": "10/31/3020",
+            "line_indexes": []
+        },
+        "expdate": {
+            "value": "10/31/3021",
+            "line_indexes": []
+        },
+        "carrier": {
+            "value": "",
+            "line_indexes": []
+        },
+        "valuedDate": {
+            "value": "",
+            "line_indexes": []
+        },
+        "claimNumber": {
+            "value": "",
+            "line_indexes": []
+        },
+        "claimant": {
+            "value": "",
+            "line_indexes": []
+        },
+        "claimStatus": {
+            "value": "",
+            "line_indexes": []
+        },
+        "closedDate": {
+            "value": "",
+            "line_indexes": []
+        },
+        "reportedDate": {
+            "value": "",
+            "line_indexes": []
+        },
+        "dateOfLoss": {
+            "value": "",
+            "line_indexes": []
+        },
+        "lossDescription": {
+            "value": "",
+            "line_indexes": []
+        },
+        "lossLocation": {
+            "value": "",
+            "line_indexes": []
+        },
+        "state": {
+            "value": "",
+            "line_indexes": []
+        },
+        "city": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalPaid": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalPaid2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalPaid3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalReserves": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalReserves2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "medicalReserves3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid4": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid5": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityPaid6": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves4": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves5": {
+            "value": "",
+            "line_indexes": []
+        },
+        "indemnityReserves6": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid4": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid5": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesPaid6": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves4": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves5": {
+            "value": "",
+            "line_indexes": []
+        },
+        "expensesReserves6": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalPaid": {
+            "value": "$56.00",
+            "line_indexes": []
+        },
+        "totalPaid2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalReserve": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalReserve2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalIncurredSource": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries2": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries3": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries4": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries5": {
+            "value": "",
+            "line_indexes": []
+        },
+        "recoveries6": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalMedical": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalIndemnity": {
+            "value": "",
+            "line_indexes": []
+        },
+        "totalExpenses": {
+            "value": "",
+            "line_indexes": []
+        },
+        "inferredCurrency": {
+            "value": "",
+            "line_indexes": []
+        },
+        "pageNumber": {
+            "value": "",
+            "line_indexes": []
+        },
+        "sheetName": {
+            "value": "",
+            "line_indexes": []
+        }
+    },
+    "bounding_boxes": {
+        "line_metadata": []
+    }
+}

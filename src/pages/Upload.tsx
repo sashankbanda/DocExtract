@@ -98,7 +98,7 @@ export default function UploadPage() {
         );
 
         // Extract structured fields if we have text (bounding boxes are optional)
-        let structuredFields: Record<string, { value: string | null; start: number | null; end: number | null; word_indexes: number[] }> = {};
+        let structuredFields: Record<string, { value: string | null; line_indexes: number[] }> = {};
         
         if (result.text) {
           try {
@@ -111,7 +111,6 @@ export default function UploadPage() {
             const structured = await extractFields({
               text: result.text,
               boundingBoxes: result.boundingBoxes || {},
-              templateName: "standard_template",
             });
 
             structuredFields = structured.fields;

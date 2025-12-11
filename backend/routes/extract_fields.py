@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from services.mapping_service import _load_template, extract_fields_from_text, normalize_bounding_boxes
+from services.mapping_service import extract_fields_from_text, normalize_bounding_boxes
 from utils.file_saver import get_output_path, save_json
 
 logger = logging.getLogger(__name__)
@@ -20,23 +20,21 @@ class ExtractFieldsRequest(BaseModel):
         default=None,
         description="Bounding box metadata from LLMWhisperer (dict or list)",
     )
-    templateName: str = Field(
-        default="standard_template",
-        description="Name of the template to use (without .json extension)",
-    )
 
 
 class FieldData(BaseModel):
     """Model for individual field data."""
 
     value: str
-    word_indexes: list[int] = Field(default_factory=list)  # Word indexes for highlighting
+    line_indexes: list[int] = Field(default_factory=list)  # Line indexes for highlighting
 
 
 class ExtractFieldsResponse(BaseModel):
     """Response model for field extraction."""
 
+    text: str
     fields: Dict[str, FieldData]
+    bounding_boxes: Dict[str, Any]
 
 
 @router.post("", response_model=ExtractFieldsResponse)
@@ -47,8 +45,8 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
     This endpoint:
     1. Loads the specified template JSON
     2. Uses Groq LLM to extract field values from the text
-    3. Maps field values to word_indexes using exact string matching from bounding_boxes.words
-    4. Returns structured field data with word_indexes only (no start/end)
+    3. Maps field values to line_indexes using exact string matching over line metadata
+    4. Returns structured field data with line_indexes only (no offsets)
 
     Args:
         request: ExtractFieldsRequest with text, boundingBoxes, and optional templateName
@@ -66,13 +64,7 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
             detail="Text cannot be empty.",
         )
 
-    template_name = request.templateName or "standard_template"
-
     try:
-        # Load template
-        logger.info(f"Loading template: {template_name}")
-        template = _load_template(template_name)
-
         # Normalize bounding boxes (convert list to dict, handle None)
         normalized_boxes = normalize_bounding_boxes(request.boundingBoxes)
         logger.info(f"Normalized bounding boxes: type={type(normalized_boxes).__name__}, keys={len(normalized_boxes) if isinstance(normalized_boxes, dict) else 'N/A'}")
@@ -82,7 +74,6 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         result = await extract_fields_from_text(
             text=request.text,
             bounding_boxes=normalized_boxes,
-            template=template,
         )
 
         # Convert to response format
@@ -90,15 +81,12 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         for field_key, field_data in result.get("fields", {}).items():
             fields_dict[field_key] = FieldData(
                 value=field_data.get("value", ""),
-                word_indexes=field_data.get("word_indexes", []),
+                line_indexes=field_data.get("line_indexes", []),
             )
 
         logger.info(f"Successfully extracted {len(fields_dict)} fields")
         
         # Save structured fields to output_files/ as 04_<filename>_structured.json
-        # NOTE: Each field includes word_indexes for word-level highlighting
-        # Backend generates word-level boxes from line-level boxes returned by LLMWhisperer
-        # Note: Original filename is not available in this endpoint, so we use a hash-based filename
         try:
             import hashlib
             # Try to extract whisperHash from boundingBoxes if available
@@ -115,21 +103,21 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
             
             structured_path = get_output_path(filename, suffix="_structured", prefix="04")
             # Save with line_numbers included for each field
-            save_json(structured_path, {"fields": {k: v.dict() for k, v in fields_dict.items()}})
+            save_json(structured_path, {
+                "text": request.text,
+                "fields": {k: v.dict() for k, v in fields_dict.items()},
+                "bounding_boxes": normalized_boxes or {},
+            })
             logger.info("Saved structured fields to %s", structured_path)
         except Exception as e:
             logger.warning(f"Failed to save structured fields: {e}")
             # Continue processing even if saving fails
         
-        return ExtractFieldsResponse(fields=fields_dict)
-
-    except FileNotFoundError as exc:
-        error_msg = f"Template not found: {template_name}"
-        logger.error(f"{error_msg}: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=error_msg,
-        ) from exc
+        return ExtractFieldsResponse(
+            text=request.text,
+            fields=fields_dict,
+            bounding_boxes=normalized_boxes or {},
+        )
     except ValueError as exc:
         error_msg = f"Invalid template or data: {str(exc)}"
         logger.error(error_msg)

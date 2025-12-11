@@ -1,10 +1,9 @@
-import asyncio
 import logging
 import os
+import tempfile
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-import httpx
 from fastapi import HTTPException, UploadFile, status
 from unstract.llmwhisperer import LLMWhispererClientV2
 
@@ -12,23 +11,17 @@ from utils.file_saver import get_input_path, save_bytes
 
 logger = logging.getLogger(__name__)
 
-LLMWHISPERER_BASE_URL = os.getenv(
-    "LLMWHISPERER_BASE_URL",
-    "https://llmwhisperer-api.us-central.unstract.com/api/v2",
-)
 LLMWHISPERER_API_KEY = os.getenv("LLMWHISPERER_API_KEY")
-POLL_INTERVAL_SECONDS = float(os.getenv("LLMWHISPERER_POLL_INTERVAL", "2.0"))
-MAX_POLL_ATTEMPTS = int(os.getenv("LLMWHISPERER_MAX_POLLS", "90"))
 
 # Initialize LLMWhisperer SDK V2 client
 llmw_client = LLMWhispererClientV2(
     base_url="https://llmwhisperer-api.us-central.unstract.com/api/v2",
-    api_key=LLMWHISPERER_API_KEY
+    api_key=LLMWHISPERER_API_KEY,
 )
 
 
 async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
-    """Upload a file to LLMWhisperer v2 and poll until the extraction completes."""
+    """Upload a file to LLMWhisperer v2 and return text + line-level highlights."""
     if not LLMWHISPERER_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -44,116 +37,75 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
             detail=f"'{upload_file.filename}' is empty.",
         )
 
-    # Save original file to input_files/ as 01_<filename> (raw file, no extension change)
-    # This preserves the original uploaded file for reference
+    # Save original file locally for reference and whisper call
+    input_path = get_input_path(upload_file.filename or "unknown", prefix="01")
+    if upload_file.filename:
+        original_ext = Path(upload_file.filename).suffix
+        if original_ext:
+            input_path = input_path.with_suffix(original_ext)
+
     try:
-        input_path = get_input_path(upload_file.filename or "unknown", prefix="01")
-        # Add original extension if it exists
-        if upload_file.filename:
-            original_ext = Path(upload_file.filename).suffix
-            if original_ext:
-                input_path = input_path.with_suffix(original_ext)
         save_bytes(input_path, file_bytes)
         logger.info("Saved input file to %s", input_path)
-    except Exception as e:
-        logger.warning(f"Failed to save input file: {e}")
-        # Continue processing even if saving fails
+    except Exception as exc:
+        logger.warning(f"Failed to save input file: {exc}")
+        # Fallback to a temp file so the whisper call still succeeds
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=input_path.suffix or ".bin")
+        tmp.write(file_bytes)
+        tmp.flush()
+        tmp.close()
+        input_path = Path(tmp.name)
+        logger.info("Using temporary file for whisper call: %s", input_path)
 
-    headers = {
-        "unstract-key": LLMWHISPERER_API_KEY,
-        "Content-Type": "application/octet-stream",
-    }
-
-    params = {
-        "mode": "form",
-        "output_mode": "layout_preserving",
-    }
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
-        try:
-            response = await client.post(
-                f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper",
-                params=params,
-                content=file_bytes,
-                headers=headers,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(
-                status_code=exc.response.status_code,
-                detail=f"LLMWhisperer upload failed: {exc.response.text}",
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to reach LLMWhisperer: {exc}",
-            ) from exc
-
-        payload = response.json()
-        logger.info(f"LLMWhisperer initial response: {payload}")
-        whisper_hash = _extract_whisper_hash(payload)
-
-        extraction = await _poll_until_complete(
-            client=client,
-            whisper_hash=whisper_hash,
-            headers={"unstract-key": LLMWHISPERER_API_KEY},
+    # Invoke whisper with synchronous wait and layout-preserving output
+    try:
+        whisper_result = llmw_client.whisper(
+            file_path=str(input_path),
+            wait_for_completion=True,
+            wait_timeout=300,
+            mode="form",
+            output_mode="layout_preserving",
+            add_line_nos=False,
         )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLMWhisperer whisper failed: {exc}",
+        ) from exc
 
-    # Try multiple paths to find result_text (API structure varies)
-    result_text = _extract_result_text(extraction)
-    
-    # Get highlight data using SDK
+    result_text = _extract_result_text(whisper_result)
+    whisper_hash = _extract_whisper_hash(whisper_result)
+
     highlight_result = await get_highlight_data(whisper_hash)
+    bounding_boxes = _normalize_line_metadata(highlight_result)
 
-    if highlight_result and "line_metadata" in highlight_result:
-        line_metadata = highlight_result["line_metadata"]
-    else:
-        logger.warning("No highlight metadata from SDK, using fallback generation.")
-        line_metadata = []
-    
-    # Normalize bounding_boxes structure and generate words
-    if line_metadata and result_text:
-        words = _generate_word_level_boxes_from_line_metadata(line_metadata, result_text)
-    else:
-        words = []
-
-    bounding_boxes = {
-        "line_metadata": line_metadata,
-        "words": words,
-    }
-    logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines for {upload_file.filename or 'unknown'}")
-    
     return {
         "file_name": upload_file.filename or "unknown",
         "result_text": result_text,
         "whisper_hash": whisper_hash,
         "bounding_boxes": bounding_boxes,
-        "pages": _extract_nested(extraction, "pages"),
+        "pages": _extract_nested(whisper_result, "pages"),
     }
 
 
 def _extract_result_text(data: Dict[str, Any]) -> str:
     """Try multiple paths to extract result_text from the response."""
-    # Direct path
     if data.get("result_text"):
         return data["result_text"]
-    
-    # Nested under extraction
+
     extraction = data.get("extraction", {})
     if isinstance(extraction, dict) and extraction.get("result_text"):
         return extraction["result_text"]
-    
-    # Nested under extraction.extraction (double nested)
+
     inner = extraction.get("extraction", {})
     if isinstance(inner, dict) and inner.get("result_text"):
         return inner["result_text"]
-    
-    # Try "text" key as fallback
+
     if data.get("text"):
         return data["text"]
     if extraction.get("text"):
         return extraction["text"]
-    
+
     logger.warning(f"Could not find result_text in response. Keys: {list(data.keys())}")
     return ""
 
@@ -162,7 +114,7 @@ def _extract_nested(data: Dict[str, Any], key: str) -> Any:
     """Extract a key from nested response structure."""
     if data.get(key):
         return data[key]
-    
+
     extraction = data.get("extraction", {})
     if isinstance(extraction, dict):
         if extraction.get(key):
@@ -170,7 +122,7 @@ def _extract_nested(data: Dict[str, Any], key: str) -> Any:
         inner = extraction.get("extraction", {})
         if isinstance(inner, dict) and inner.get(key):
             return inner[key]
-    
+
     return None
 
 
@@ -190,213 +142,74 @@ def _extract_whisper_hash(payload: Dict[str, Any]) -> str:
     )
 
 
-async def _poll_until_complete(
-    client: httpx.AsyncClient,
-    whisper_hash: str,
-    headers: Dict[str, str],
-) -> Dict[str, Any]:
-    for _ in range(MAX_POLL_ATTEMPTS):
-        try:
-            status_response = await client.get(
-                f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-status",
-                params={"whisper_hash": whisper_hash},
-                headers=headers,
-            )
-            status_response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(
-                status_code=exc.response.status_code,
-                detail=f"LLMWhisperer status check failed: {exc.response.text}",
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to poll LLMWhisperer status: {exc}",
-            ) from exc
+def _normalize_line_metadata(highlight_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep only valid line-level metadata with required raw_box."""
+    if not highlight_result or not isinstance(highlight_result, dict):
+        logger.warning("Highlight data missing; returning empty line_metadata.")
+        return {"line_metadata": []}
 
-        status_payload = status_response.json()
-        status_value = (status_payload.get("status") or "").lower()
+    raw_lines = highlight_result.get("line_metadata") or []
+    if not isinstance(raw_lines, list):
+        logger.warning("Highlight data did not contain line_metadata list; returning empty.")
+        return {"line_metadata": []}
 
-        if status_value in {"processed", "completed", "done"}:
-            return await _retrieve_result(client, whisper_hash, headers)
-
-        if status_value in {"failed", "error"}:
-            message = status_payload.get("message") or "Unknown error"
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLMWhisperer extraction failed for {whisper_hash}: {message}",
-            )
-
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
-
-    raise HTTPException(
-        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        detail="Timed out waiting for LLMWhisperer to finish processing.",
-    )
-
-
-async def _retrieve_result(
-    client: httpx.AsyncClient,
-    whisper_hash: str,
-    headers: Dict[str, str],
-) -> Dict[str, Any]:
-    try:
-        retrieve_response = await client.get(
-            f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-retrieve",
-            params={"whisper_hash": whisper_hash},
-            headers=headers,
-        )
-        retrieve_response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=exc.response.status_code,
-            detail=f"LLMWhisperer retrieve failed: {exc.response.text}",
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to retrieve LLMWhisperer result: {exc}",
-        ) from exc
-
-    result = retrieve_response.json()
-    logger.info(f"LLMWhisperer retrieve response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
-    return result
-
-
-
-
-def _generate_word_level_boxes_from_line_metadata(
-    line_metadata: List[Dict[str, Any]], text: str
-) -> List[Dict[str, Any]]:
-    """
-    Create word-level bounding boxes using raw_box + text splitting.
-    Uses per-character width based on raw_box width.
-    """
-    import re
-
-    words: List[Dict[str, Any]] = []
-    global_word_index = 0
-
-    for line in line_metadata:
-        if not isinstance(line, dict):
+    normalized: List[Dict[str, Any]] = []
+    for idx, entry in enumerate(raw_lines):
+        if not isinstance(entry, dict):
             continue
 
-        raw_box = line.get("raw_box") or None
-        if not raw_box or not isinstance(raw_box, list) or len(raw_box) < 4:
+        text = (entry.get("text") or "").strip()
+        if not text:
             continue
 
-        # raw_box expected: [page, x_or_base_y, width_or_height, page_height]
-        page = raw_box[0]
-        raw_y = raw_box[1]
-        raw_height = raw_box[2]
-        raw_page_height = raw_box[3]
-
-        line_text = line.get("text", "")
-        if not isinstance(line_text, str) or not line_text:
-            continue
-
-        # Strip hex prefixes like "0x07: "
-        line_text = re.sub(r"^0x[0-9A-Fa-f]+:\\s*", "", line_text).strip()
-        if not line_text:
-            continue
-
-        tokens = line_text.split()
-        if not tokens:
-            continue
-
-        total_chars = sum(len(t) for t in tokens)
-        if total_chars == 0:
-            continue
-
-        # Estimate line width; raw_box does not provide width explicitly.
-        # Use page_height as a proxy (A4 aspect ratio) else fall back to raw_height.
-        if raw_page_height:
-            line_width = float(raw_page_height) * 0.707
+        raw_box = entry.get("raw_box") or entry.get("raw") or entry.get("bbox") or entry.get("box")
+        if isinstance(raw_box, list) and len(raw_box) >= 4:
+            box_vals = raw_box[:4]
+        elif isinstance(raw_box, dict):
+            box_vals = [
+                raw_box.get("page") or raw_box.get("x") or raw_box.get("left") or 0,
+                raw_box.get("base_y") or raw_box.get("y") or raw_box.get("top") or 0,
+                raw_box.get("height") or raw_box.get("h") or 0,
+                raw_box.get("page_height") or raw_box.get("pageHeight") or 0,
+            ]
         else:
-            line_width = float(raw_height)
+            continue
 
-        width_per_char = line_width / total_chars if total_chars else 0
-        x_cursor = 0.0
-        y = float(raw_y)
-        height = float(raw_height) if raw_height else 0.0
+        try:
+            box_ints = [int(float(v)) for v in box_vals]
+        except (TypeError, ValueError):
+            continue
 
-        for token in tokens:
-            token_width = width_per_char * len(token)
-            words.append(
-                {
-                    "index": global_word_index,
-                    "text": token,
-                    "page": int(page) if page is not None else 1,
-                    "bbox": {
-                        "x": x_cursor,
-                        "y": y,
-                        "width": token_width,
-                        "height": height,
-                    },
-                    "page_height": float(raw_page_height) if raw_page_height else 0,
-                }
-            )
-            x_cursor += token_width
-            global_word_index += 1
+        if len(box_ints) < 4 or any(v is None for v in box_ints):
+            continue
+        if all(v == 0 for v in box_ints):
+            continue
 
-    logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines.")
-    return words
+        line_number = entry.get("line_number") or entry.get("line_no") or entry.get("line") or (idx + 1)
+        page = entry.get("page") or entry.get("page_number") or box_ints[0] or 1
+        page_height = entry.get("page_height") or entry.get("pageHeight") or box_ints[3]
+
+        normalized.append(
+            {
+                "line_number": int(line_number),
+                "text": text,
+                "raw_box": [int(box_ints[0]), int(box_ints[1]), int(box_ints[2]), int(box_ints[3])],
+                "page": int(page),
+                "page_height": int(page_height) if page_height is not None else None,
+            }
+        )
+
+    return {"line_metadata": normalized}
 
 
 async def get_highlight_data(whisper_hash: str) -> Optional[Dict[str, Any]]:
-    """
-    Fetch highlight bounding boxes using LLMWhisperer SDK V2.
-    Uses full line range and normalizes raw_box.
-    """
+    """Fetch highlight bounding boxes using LLMWhisperer SDK V2 for a fixed line range."""
     try:
-        line_range = "0x01-0xFFFF"
-        logger.info(f"Requesting highlight data via SDK for range {line_range}")
-
-        data = llmw_client.get_highlight_data(
+        logger.info("Requesting highlight data via SDK for lines 1-5000")
+        return llmw_client.get_highlight_data(
             whisper_hash=whisper_hash,
-            lines=line_range,
+            lines="1-5000",
         )
-
-        if not data:
-            logger.warning("Highlight data empty — fallback will be used.")
-            return None
-
-        import re
-
-        line_metadata: List[Dict[str, Any]] = []
-
-        for line_no, entry in data.items():
-            if not isinstance(entry, dict):
-                continue
-
-            raw_box = entry.get("raw") or entry.get("raw_box") or None
-            if not raw_box or not isinstance(raw_box, list) or len(raw_box) < 4:
-                # Missing raw_box is not valid
-                logger.warning(f"Missing raw_box for line {line_no}, skipping.")
-                continue
-
-            page = entry.get("page", raw_box[0])
-            base_y = entry.get("base_y", raw_box[1])
-            height = entry.get("height", raw_box[2])
-            page_height = entry.get("page_height", raw_box[3])
-
-            line_text = entry.get("text", "")
-            if isinstance(line_text, str):
-                line_text = re.sub(r"^0x[0-9A-Fa-f]+:\\s*", "", line_text)
-            else:
-                line_text = ""
-
-            line_metadata.append(
-                {
-                    "line_no": line_no,
-                    "raw_box": [page, base_y, height, page_height],
-                    "text": line_text,
-                }
-            )
-
-        logger.info(f"Received {len(line_metadata)} highlight lines from SDK.")
-        return {"line_metadata": line_metadata}
-
-    except Exception as e:
-        logger.error(f"Highlight SDK error: {e}")
+    except Exception as exc:
+        logger.error(f"Highlight SDK error: {exc}")
         return None

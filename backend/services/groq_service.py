@@ -122,8 +122,8 @@ def _build_prompt(
     words_block = json.dumps(word_list, ensure_ascii=False)
     prompt_parts = [
         "Perform template-based extraction using the provided template.",
-        "Return a JSON array of objects with keys 'key', 'value', and 'word_indexes'.",
-        "word_indexes must be the integer indexes from the supplied word list.",
+        "Return a JSON array of objects with keys 'key', 'value', and 'line_indexes'.",
+        "line_indexes must be the integer line numbers where the value appears.",
         "Do not include any additional commentary.",
         "\nTemplate JSON:\n" + template_block,
         "\nFull Text:\n" + full_text,
@@ -163,11 +163,11 @@ def _validate_extracted_fields(data: list[Dict[str, Any]]) -> None:
     for item in data:
         if not isinstance(item, dict):
             raise ValueError("Each extracted field must be a JSON object.")
-        for key in ("key", "value", "word_indexes"):
+        for key in ("key", "value", "line_indexes"):
             if key not in item:
                 raise ValueError(f"Missing '{key}' in extracted field.")
         item["key"] = str(item["key"])
         item["value"] = str(item["value"])
-        if not isinstance(item["word_indexes"], list):
-            raise ValueError("word_indexes must be a list of integers.")
-        item["word_indexes"] = [int(idx) for idx in item["word_indexes"]]
+        if not isinstance(item["line_indexes"], list):
+            raise ValueError("line_indexes must be a list of integers.")
+        item["line_indexes"] = [int(idx) for idx in item["line_indexes"]]

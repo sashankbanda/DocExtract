@@ -12,10 +12,9 @@ interface PDFViewerWrapperProps {
   documentId: string;
   fileName?: string;
   pdfSource?: string | File | ArrayBuffer | Uint8Array; // URL, File, or ArrayBuffer
-  // New API: for word index-based highlighting
-  // NOTE: Backend generates word-level boxes from line-level boxes returned by LLMWhisperer
-  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains word-level boxes)
-  selectedIndexes?: number[]; // Word indexes to highlight (0-based)
+  // Highlighting uses line-level bounding boxes only
+  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains line_metadata)
+  selectedLineIndexes?: number[]; // Line indexes to highlight (1-based)
   activeHighlightId?: string | null; // ID of active highlight
   // Legacy API: for direct bounding box highlighting (backward compatibility)
   highlights?: BoundingBox[];
@@ -31,73 +30,8 @@ interface PageMetadata {
 }
 
 export interface PDFViewerRef {
-  scrollToHighlight: (wordIndexes: number[]) => void;
-  scrollToPage: (pageNumber: number, wordIndex?: number) => void;
-  getPageForWordIndex: (wordIndex: number) => number | null;
-}
-
-// Helper function to build index lookup from bounding boxes
-function buildIndexLookup(bboxes: Record<string, unknown>): Map<number, BoundingBox> {
-  const lookup = new Map<number, BoundingBox>();
-  if (!bboxes) return lookup;
-
-  const words = (bboxes.words as unknown[]) || [];
-  const pages = (bboxes.pages as unknown[]) || [];
-
-  words.forEach((word: unknown) => {
-    if (!word || typeof word !== "object") return;
-    const wordObj = word as Record<string, unknown>;
-    const index = wordObj.index;
-    if (typeof index !== "number") return;
-
-    const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
-    if (!bbox || typeof bbox !== "object") return;
-
-    const page = (wordObj.page || 1) as number;
-    const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
-    const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
-    const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
-    const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
-
-    lookup.set(index, {
-      x: Math.min(x1, x2),
-      y: Math.min(y1, y2),
-      width: Math.abs(x2 - x1),
-      height: Math.abs(y2 - y1),
-      page: typeof page === "number" ? page : 1,
-    });
-  });
-
-  pages.forEach((page: unknown) => {
-    if (!page || typeof page !== "object") return;
-    const pageObj = page as Record<string, unknown>;
-    const pageNum = (pageObj.page ?? pageObj.index ?? 1) as number;
-    const pageWords = (pageObj.words || []) as unknown[];
-    pageWords.forEach((word: unknown) => {
-      if (!word || typeof word !== "object") return;
-      const wordObj = word as Record<string, unknown>;
-      const index = wordObj.index;
-      if (typeof index !== "number") return;
-
-      const bbox = (wordObj.bbox || wordObj.bounding_box || {}) as Record<string, unknown>;
-      if (!bbox || typeof bbox !== "object") return;
-
-      const x1 = (bbox.x1 ?? bbox.x ?? bbox.left ?? 0) as number;
-      const y1 = (bbox.y1 ?? bbox.y ?? bbox.top ?? 0) as number;
-      const x2 = (bbox.x2 ?? bbox.right ?? (x1 + ((bbox.width ?? 0) as number))) as number;
-      const y2 = (bbox.y2 ?? bbox.bottom ?? (y1 + ((bbox.height ?? 0) as number))) as number;
-
-      lookup.set(index, {
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        width: Math.abs(x2 - x1),
-        height: Math.abs(y2 - y1),
-        page: typeof pageNum === "number" ? pageNum : 1,
-      });
-    });
-  });
-
-  return lookup;
+  scrollToHighlight: (lineIndexes: number[]) => void;
+  scrollToPage: (pageNumber: number, lineIndex?: number) => void;
 }
 
 export const PDFViewerWrapper = forwardRef<PDFViewerRef, PDFViewerWrapperProps>(
@@ -106,7 +40,7 @@ function PDFViewerWrapper({
   fileName,
   pdfSource,
   boundingBoxes,
-  selectedIndexes = [],
+  selectedLineIndexes = [],
   activeHighlightId = null,
   highlights = [],
   activeHighlight,
@@ -126,7 +60,25 @@ function PDFViewerWrapper({
   const renderTaskRef = useRef<Map<number, pdfjsLib.RenderTask>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
   const canvasRefsRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
-  const wordIndexToPageMapRef = useRef<Map<number, number>>(new Map());
+
+  const getLineEntry = useCallback(
+    (lineNumber: number) => {
+      if (!boundingBoxes || typeof boundingBoxes !== "object") return null;
+      const lines = ((boundingBoxes as any).line_metadata || (boundingBoxes as any).lines || []) as any[];
+      if (!Array.isArray(lines)) return null;
+      return (
+        lines.find((entry) => {
+          if (!entry || typeof entry !== "object") return false;
+          const ln =
+            (entry as any).line_number ??
+            (entry as any).line_no ??
+            (entry as any).line;
+          return Number(ln) === Number(lineNumber);
+        }) || null
+      );
+    },
+    [boundingBoxes]
+  );
 
   // Load PDF document
   useEffect(() => {
@@ -189,40 +141,6 @@ function PDFViewerWrapper({
         setCurrentPage(1);
         setZoom(100);
         setPagesLoaded(false);
-
-        // Build word index to page mapping if bounding boxes are available
-        if (boundingBoxes) {
-          const wordIndexMap = new Map<number, number>();
-          const words = (boundingBoxes.words as unknown[]) || [];
-          const pages = (boundingBoxes.pages as unknown[]) || [];
-
-          words.forEach((word: unknown) => {
-            if (word && typeof word === "object" && "index" in word && "page" in word) {
-              const index = word.index as number;
-              const page = word.page as number;
-              if (typeof index === "number" && typeof page === "number") {
-                wordIndexMap.set(index, page);
-              }
-            }
-          });
-
-          pages.forEach((page: unknown) => {
-            if (page && typeof page === "object") {
-              const pageNum = ("page" in page ? page.page : "index" in page ? page.index : null) as number | null;
-              const pageWords = ("words" in page ? page.words : []) as unknown[];
-              pageWords.forEach((word: unknown) => {
-                if (word && typeof word === "object" && "index" in word && pageNum !== null) {
-                  const index = word.index as number;
-                  if (typeof index === "number") {
-                    wordIndexMap.set(index, pageNum);
-                  }
-                }
-              });
-            }
-          });
-
-          wordIndexToPageMapRef.current = wordIndexMap;
-        }
 
         // Initialize page metadata array
         const metadata: PageMetadata[] = [];
@@ -368,8 +286,8 @@ function PDFViewerWrapper({
     setZoom(100);
   }, []);
 
-  // Scroll to page function
-  const scrollToPage = useCallback((pageNumber: number, wordIndex?: number) => {
+  // Scroll to page function (optionally focus on a specific line)
+  const scrollToPage = useCallback((pageNumber: number, lineIndex?: number) => {
     if (!containerRef.current || !pageMetadata.length || pageNumber < 1 || pageNumber > totalPages) {
       return;
     }
@@ -383,14 +301,21 @@ function PDFViewerWrapper({
 
     let scrollY = pageOffset - 100; // 100px offset from top
 
-    // If wordIndex is provided, try to scroll to that specific word
-    if (wordIndex !== undefined && boundingBoxes) {
-      const lookup = buildIndexLookup(boundingBoxes);
-      const wordBox = lookup.get(wordIndex);
-      if (wordBox && wordBox.page === pageNumber) {
-        const scale = zoom / 100;
-        const wordY = wordBox.y * scale;
-        scrollY = pageOffset + wordY - 150; // 150px offset to show word near top
+    // If lineIndex is provided, try to scroll to that specific line
+    if (lineIndex !== undefined && boundingBoxes) {
+      const entry = getLineEntry(lineIndex);
+      const rawBox = entry?.raw_box || entry?.raw || entry?.bbox || entry?.box;
+      const pageHeightSource = entry?.page_height || entry?.pageHeight || (Array.isArray(rawBox) ? rawBox[3] : undefined);
+      if (entry && Array.isArray(rawBox) && rawBox.length >= 4 && (entry.page ?? rawBox[0] ?? 1) === pageNumber) {
+        const pageMeta = pageMetadata[pageIndex];
+        const pageHeight = pageHeightSource || pageMeta?.height || 0;
+        if (pageMeta && pageHeight) {
+          const baseY = Number(rawBox[1]);
+          const rawHeight = Number(rawBox[2]);
+          const scaleFactor = pageMeta.height / pageHeight;
+          const yFlipped = pageHeight - (baseY + rawHeight);
+          scrollY = pageOffset + yFlipped * scaleFactor - 150; // 150px offset to show line near top
+        }
       }
     }
 
@@ -400,35 +325,25 @@ function PDFViewerWrapper({
     });
   }, [pageMetadata, totalPages, zoom, boundingBoxes]);
 
-  // Scroll to highlight function - uses word indexes
-  const scrollToHighlight = useCallback((wordIndexes: number[]) => {
-    if (!wordIndexes.length || !boundingBoxes || !containerRef.current || !pageMetadata.length) {
+  // Scroll to highlight function - uses line indexes
+  const scrollToHighlight = useCallback((lineIndexes: number[]) => {
+    if (!lineIndexes.length || !boundingBoxes || !containerRef.current || !pageMetadata.length) {
       return;
     }
 
-    // Build lookup from word-level boxes
-    const lookup = buildIndexLookup(boundingBoxes);
-    const firstIndex = wordIndexes[0];
-    const wordBox = lookup.get(firstIndex);
-    
-    if (!wordBox) return;
-    
-    const page = wordBox.page;
-    scrollToPage(page, firstIndex);
-  }, [boundingBoxes, pageMetadata, scrollToPage]);
+    const firstIndex = lineIndexes[0];
+    const entry = getLineEntry(firstIndex);
+    if (!entry) return;
 
-  // Get page for word index
-  const getPageForWordIndex = useCallback((wordIndex: number): number | null => {
-    const page = wordIndexToPageMapRef.current.get(wordIndex);
-    return page || null;
-  }, []);
+    const page = Number(entry.page ?? 1);
+    scrollToPage(page, firstIndex);
+  }, [boundingBoxes, pageMetadata, scrollToPage, getLineEntry]);
 
   // Expose imperative API via ref
   useImperativeHandle(ref, () => ({
     scrollToHighlight,
     scrollToPage,
-    getPageForWordIndex,
-  }), [scrollToHighlight, scrollToPage, getPageForWordIndex]);
+  }), [scrollToHighlight, scrollToPage]);
 
 
   // Calculate page offsets for highlight positioning
@@ -619,12 +534,11 @@ function PDFViewerWrapper({
                   }}
                 >
                   {/* Use new API if boundingBoxes is provided */}
-                  {/* NOTE: Backend generates word-level boxes from line-level boxes */}
-                  {/* We highlight only the specific word_indexes for each field */}
+                  {/* Highlight lines using line-level boxes */}
                   {boundingBoxes ? (
                     <HighlightOverlay
                       boundingBoxes={boundingBoxes}
-                      selectedIndexes={selectedIndexes}
+                      selectedLineIndexes={selectedLineIndexes}
                       pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
                         const canvas = canvasRefsRef.current.get(i + 1);
                         return { current: canvas } as React.RefObject<HTMLCanvasElement>;

@@ -128,11 +128,12 @@ export async function uploadSingleDocument(
 export interface ExtractFieldsPayload {
   text: string;
   boundingBoxes?: Record<string, unknown> | unknown[] | null;
-  templateName?: string;
 }
 
 export interface ExtractFieldsResponse {
+  text: string;
   fields: Record<string, StructuredFieldData>;
+  bounding_boxes: Record<string, unknown>;
 }
 
 export async function extractFields(
@@ -146,7 +147,6 @@ export async function extractFields(
     body: JSON.stringify({
       text: payload.text,
       boundingBoxes: payload.boundingBoxes ?? {},
-      templateName: payload.templateName || "standard_template",
     }),
   });
 
@@ -157,6 +157,8 @@ export async function extractFields(
   }
 
   return {
+    text: data.text ?? "",
     fields: data.fields,
+    bounding_boxes: data.bounding_boxes ?? {},
   };
 }

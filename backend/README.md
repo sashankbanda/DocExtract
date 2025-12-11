@@ -26,7 +26,7 @@ This FastAPI backend powers the document extraction workflow described in the PR
 ## Available Routes
 
 - `POST /upload` – Accepts multiple files (`PDF`, `PNG`, `JPG`, `JPEG`, `TIFF`, `DOCX`, `XLSX`) and proxies them to LLMWhisperer with `layout_preserving` mode and line numbers enabled. Returns text, bounding boxes, page metadata, and the whisper hash per file.
-- `POST /extract-fields` – Uses Groq to perform template-driven extraction. Returns an array of `{ key, value, word_indexes }` objects that align with the frontend template panels.
+- `POST /extract-fields` – Uses Groq to perform template-driven extraction. Returns an array of `{ key, value, line_indexes }` objects that align with the frontend template panels.
 - `POST /highlight` – Converts word indexes to merged bounding boxes for the PDF overlay.
 
 ### Error Handling

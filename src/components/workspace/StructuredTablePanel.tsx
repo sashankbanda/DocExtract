@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 
 interface StructuredTablePanelProps {
   structuredFields?: Record<string, StructuredFieldData>;
-  onFieldClick?: (wordIndexes: number[]) => void;
-  onFieldHover?: (wordIndexes: number[] | null) => void;
+  onFieldClick?: (lineIndexes: number[]) => void;
+  onFieldHover?: (lineIndexes: number[] | null) => void;
   isLoading?: boolean;
 }
 
@@ -31,15 +31,15 @@ export function StructuredTablePanel({
   isLoading = false,
 }: StructuredTablePanelProps) {
   const [isAnimating, setIsAnimating] = useState(false);
-  const handleRowClick = (wordIndexes: number[]) => {
-    if (onFieldClick && wordIndexes.length > 0) {
-      onFieldClick(wordIndexes);
+  const handleRowClick = (lineIndexes: number[]) => {
+    if (onFieldClick && lineIndexes.length > 0) {
+      onFieldClick(lineIndexes);
     }
   };
 
-  const handleRowHover = (wordIndexes: number[] | null) => {
+  const handleRowHover = (lineIndexes: number[] | null) => {
     if (onFieldHover) {
-      onFieldHover(wordIndexes);
+      onFieldHover(lineIndexes);
     }
   };
 
@@ -53,13 +53,12 @@ export function StructuredTablePanel({
   }, [structuredFields]);
 
   // Convert structuredFields object to array of entries
-  // Use word_indexes for highlighting (backend generates word-level boxes)
   const fields = structuredFields
     ? Object.entries(structuredFields)
         .map(([key, data]) => ({
           key,
           value: data.value || "",
-          word_indexes: data.word_indexes || [],
+          line_indexes: data.line_indexes || [],
         }))
         .filter((field) => field.value !== null && field.value !== "")
     : [];
@@ -148,11 +147,11 @@ export function StructuredTablePanel({
                   transition={{ delay: index * 0.03, duration: 0.2 }}
                   className={cn(
                     "border-t border-border/30 transition-all duration-200",
-                    field.word_indexes.length > 0 && "hover:bg-primary/10 hover:border-primary/30 cursor-pointer"
+                    field.line_indexes.length > 0 && "hover:bg-primary/10 hover:border-primary/30 cursor-pointer"
                   )}
-                  onMouseEnter={() => handleRowHover(field.word_indexes)}
+                  onMouseEnter={() => handleRowHover(field.line_indexes)}
                   onMouseLeave={() => handleRowHover(null)}
-                  onClick={() => handleRowClick(field.word_indexes)}
+                  onClick={() => handleRowClick(field.line_indexes)}
                 >
                   <td className="px-4 py-3 font-medium text-foreground">
                     {field.key}
