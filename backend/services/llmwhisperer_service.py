@@ -6,6 +6,8 @@ from typing import Any, Dict
 import httpx
 from fastapi import HTTPException, UploadFile, status
 
+from utils.file_saver import get_input_path, save_bytes
+
 logger = logging.getLogger(__name__)
 
 LLMWHISPERER_BASE_URL = os.getenv(
@@ -33,6 +35,14 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"'{upload_file.filename}' is empty.",
         )
+
+    # Save original file to input_files/
+    try:
+        input_path = get_input_path(upload_file.filename or "unknown", prefix="01")
+        save_bytes(input_path, file_bytes)
+    except Exception as e:
+        logger.warning(f"Failed to save input file: {e}")
+        # Continue processing even if saving fails
 
     headers = {
         "unstract-key": LLMWHISPERER_API_KEY,

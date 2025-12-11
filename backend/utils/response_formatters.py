@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Dict, Optional
 
+from utils.file_saver import get_output_path, save_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,11 +22,29 @@ def format_upload_response(extraction_result: Dict[str, Any]) -> Dict[str, Any]:
     if not whisper_hash:
         raise ValueError(f"Missing whisper hash for '{file_name}'.")
 
+    # Save extracted text to output_files/
+    try:
+        text_path = get_output_path(file_name, suffix="_text", prefix="02")
+        save_json(text_path, {"text": result_text, "whisperHash": whisper_hash})
+    except Exception as e:
+        logger.warning(f"Failed to save extracted text: {e}")
+        # Continue processing even if saving fails
+
+    # Save bounding boxes to output_files/
+    bounding_boxes = _safe_get(extraction_result, "bounding_boxes")
+    if bounding_boxes:
+        try:
+            bboxes_path = get_output_path(file_name, suffix="_bboxes", prefix="03")
+            save_json(bboxes_path, {"boundingBoxes": bounding_boxes, "whisperHash": whisper_hash})
+        except Exception as e:
+            logger.warning(f"Failed to save bounding boxes: {e}")
+            # Continue processing even if saving fails
+
     return {
         "fileName": file_name,
         "text": result_text,
         "whisperHash": whisper_hash,
-        "boundingBoxes": _safe_get(extraction_result, "bounding_boxes"),
+        "boundingBoxes": bounding_boxes,
         "pages": _safe_get(extraction_result, "pages"),
     }
 

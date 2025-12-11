@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.mapping_service import _load_template, extract_fields_from_text, normalize_bounding_boxes
+from utils.file_saver import get_output_path, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,30 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
             )
 
         logger.info(f"Successfully extracted {len(fields_dict)} fields")
+        
+        # Save structured fields to output_files/
+        # Note: Original filename is not available in this endpoint, so we use a hash-based identifier
+        # In production, consider adding filename as an optional parameter to the request
+        try:
+            import hashlib
+            # Try to extract whisperHash from boundingBoxes if available
+            filename = None
+            if isinstance(normalized_boxes, dict):
+                whisper_hash = normalized_boxes.get("whisperHash") or normalized_boxes.get("whisper_hash")
+                if whisper_hash:
+                    filename = f"file_{str(whisper_hash)[:12]}"
+            
+            # Fallback to text hash if no whisperHash found
+            if not filename:
+                text_hash = hashlib.md5(request.text.encode()).hexdigest()[:12]
+                filename = f"extracted_{text_hash}"
+            
+            structured_path = get_output_path(filename, suffix="_structured", prefix="04")
+            save_json(structured_path, {"fields": {k: v.dict() for k, v in fields_dict.items()}})
+        except Exception as e:
+            logger.warning(f"Failed to save structured fields: {e}")
+            # Continue processing even if saving fails
+        
         return ExtractFieldsResponse(fields=fields_dict)
 
     except FileNotFoundError as exc:
