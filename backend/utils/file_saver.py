@@ -26,19 +26,22 @@ def sanitize_filename(filename: str) -> str:
         filename: Original filename
         
     Returns:
-        Safe filename without extension
+        Safe filename without extension, in snake_case
     """
     # Remove extension
     name = Path(filename).stem
     
     # Replace spaces and unsafe characters with underscores
-    name = re.sub(r'[^\w\-_\.]', '_', name)
+    name = re.sub(r'[^\w\-_]', '_', name)
     
     # Remove multiple consecutive underscores
     name = re.sub(r'_+', '_', name)
     
     # Remove leading/trailing underscores
     name = name.strip('_')
+    
+    # Convert to snake_case (lowercase)
+    name = name.lower()
     
     return name or "file"
 
@@ -96,7 +99,7 @@ def get_input_path(filename: str, prefix: str = "01") -> Path:
     return INPUT_DIR / f"{prefix}_{safe_name}"
 
 
-def get_output_path(filename: str, suffix: str, prefix: str) -> Path:
+def get_output_path(filename: str, suffix: str, prefix: str, extension: str = "json") -> Path:
     """
     Get path for output file with prefix and suffix.
     
@@ -104,10 +107,30 @@ def get_output_path(filename: str, suffix: str, prefix: str) -> Path:
         filename: Original filename
         suffix: Suffix to add (e.g., "_text", "_bboxes", "_structured")
         prefix: Two-digit prefix (e.g., "02", "03", "04")
+        extension: File extension (default: "json")
         
     Returns:
         Path object for the output file
     """
     safe_name = sanitize_filename(filename)
-    return OUTPUT_DIR / f"{prefix}_{safe_name}{suffix}.json"
+    return OUTPUT_DIR / f"{prefix}_{safe_name}{suffix}.{extension}"
+
+
+def save_text(path: Path, text: str) -> None:
+    """
+    Save text data to a file.
+    
+    Args:
+        path: Full path to save the file
+        text: Text content to save
+    """
+    try:
+        ensure_folders()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        logger.info("Saved text file to %s", path)
+    except Exception as e:
+        logger.error("Failed to save text to %s: %s", path, e)
+        # Don't raise - file saving should not break the API
 

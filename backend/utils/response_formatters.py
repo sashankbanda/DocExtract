@@ -1,7 +1,7 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from utils.file_saver import get_output_path, save_json
+from utils.file_saver import get_output_path, save_json, save_text
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +22,27 @@ def format_upload_response(extraction_result: Dict[str, Any]) -> Dict[str, Any]:
     if not whisper_hash:
         raise ValueError(f"Missing whisper hash for '{file_name}'.")
 
-    # Save extracted text to output_files/
+    # Save extracted text as .txt file (not JSON)
+    # This preserves the exact layout_preserving text from LLMWhisperer
     try:
-        text_path = get_output_path(file_name, suffix="_text", prefix="02")
-        save_json(text_path, {"text": result_text, "whisperHash": whisper_hash})
+        text_path = get_output_path(file_name, suffix="_text", prefix="02", extension="txt")
+        save_text(text_path, result_text)
+        logger.info("Saved extracted text to %s", text_path)
     except Exception as e:
         logger.warning(f"Failed to save extracted text: {e}")
         # Continue processing even if saving fails
 
-    # Save bounding boxes to output_files/
+    # Save bounding boxes to output_files/ with improved format
+    # Format: Each line entry includes line_number, text, and raw_box
     bounding_boxes = _safe_get(extraction_result, "bounding_boxes")
     if bounding_boxes:
         try:
             bboxes_path = get_output_path(file_name, suffix="_bboxes", prefix="03")
-            save_json(bboxes_path, {"boundingBoxes": bounding_boxes, "whisperHash": whisper_hash})
+            formatted_bboxes = _format_bounding_boxes_for_save(
+                bounding_boxes, result_text, whisper_hash
+            )
+            save_json(bboxes_path, formatted_bboxes)
+            logger.info("Saved bounding boxes to %s", bboxes_path)
         except Exception as e:
             logger.warning(f"Failed to save bounding boxes: {e}")
             # Continue processing even if saving fails
@@ -52,3 +59,76 @@ def format_upload_response(extraction_result: Dict[str, Any]) -> Dict[str, Any]:
 def _safe_get(source: Dict[str, Any], key: str) -> Optional[Any]:
     value = source.get(key)
     return value if value not in ({}, []) else None
+
+
+def _format_bounding_boxes_for_save(
+    bounding_boxes: Any, result_text: str, whisper_hash: str
+) -> Dict[str, Any]:
+    """
+    Format bounding boxes for saving with line_number, text, and raw_box.
+    
+    LLMWhisperer returns line_metadata which contains line-level bounding boxes,
+    not word-level. Each line has a line number and bounding box coordinates.
+    
+    Args:
+        bounding_boxes: Raw bounding box data from LLMWhisperer (line_metadata)
+        result_text: The extracted text (split by lines to match line numbers)
+        whisper_hash: Whisper hash for reference
+        
+    Returns:
+        Formatted dictionary with line entries
+    """
+    lines = result_text.split("\n")
+    formatted_lines: List[Dict[str, Any]] = []
+    
+    # Handle different bounding box structures
+    line_metadata = None
+    if isinstance(bounding_boxes, dict):
+        line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
+    elif isinstance(bounding_boxes, list):
+        line_metadata = bounding_boxes
+    
+    if not line_metadata:
+        # Fallback: return basic structure
+        return {
+            "whisperHash": whisper_hash,
+            "lines": [],
+            "note": "No line metadata available"
+        }
+    
+    # Process line metadata
+    if isinstance(line_metadata, list):
+        for idx, line_data in enumerate(line_metadata):
+            line_number = None
+            raw_box = None
+            text = lines[idx] if idx < len(lines) else ""
+            
+            if isinstance(line_data, dict):
+                line_number = line_data.get("line_no") or line_data.get("line_number") or line_data.get("line") or (idx + 1)
+                # Extract bounding box - format may vary
+                bbox = line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box")
+                if bbox:
+                    if isinstance(bbox, list) and len(bbox) >= 4:
+                        # Assume format: [page, base_y, height, page_height]
+                        raw_box = bbox[:4]
+                    elif isinstance(bbox, dict):
+                        # Convert dict to list format
+                        page = bbox.get("page", 1)
+                        base_y = bbox.get("y") or bbox.get("base_y") or bbox.get("top", 0)
+                        height = bbox.get("height", 0)
+                        page_height = bbox.get("page_height") or bbox.get("pageHeight", 0)
+                        raw_box = [page, base_y, height, page_height]
+            else:
+                line_number = idx + 1
+                raw_box = None
+            
+            formatted_lines.append({
+                "line_number": int(line_number) if line_number is not None else (idx + 1),
+                "text": text,
+                "raw_box": raw_box if raw_box else None
+            })
+    
+    return {
+        "whisperHash": whisper_hash,
+        "lines": formatted_lines
+    }

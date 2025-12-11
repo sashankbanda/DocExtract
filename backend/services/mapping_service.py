@@ -73,9 +73,14 @@ async def extract_fields_from_text(
     """
     Extract fields from layout-preserving text using LLM.
 
+    NOTE: We no longer extract start/end from Groq. Groq only extracts VALUES.
+    Word index mapping is done backend-side using LLMWhisperer highlight data.
+    LLMWhisperer returns line-level bounding boxes, not word-level, so we map
+    word_indexes to line_numbers for line-level highlighting.
+
     Args:
         text: Full layout-preserving text from LLMWhisperer
-        bounding_boxes: Dictionary mapping word indexes to bounding box data
+        bounding_boxes: Dictionary containing line_metadata (line-level bounding boxes)
         template: Template dictionary with field keys
 
     Returns:
@@ -84,9 +89,8 @@ async def extract_fields_from_text(
             "fields": {
                 "field_key": {
                     "value": "...",
-                    "start": int | None,
-                    "end": int | None,
-                    "word_indexes": [int, ...]
+                    "word_indexes": [int, ...],
+                    "line_numbers": [int, ...]  # Line numbers for highlighting
                 }
             }
         }
@@ -100,7 +104,8 @@ async def extract_fields_from_text(
         logger.warning("Invalid or empty bounding boxes provided, extraction will proceed without word indexes")
         bounding_boxes = {}
 
-    # Build LLM prompt
+    # Build LLM prompt - only extract values, no positional metadata
+    # Word index mapping will be done backend-side using LLMWhisperer highlight data
     prompt = _build_extraction_prompt(text, template)
 
     # Call Groq service
@@ -121,74 +126,69 @@ async def extract_fields_from_text(
     if not llm_response:
         return {"fields": _create_empty_fields(template)}
 
-    # Parse LLM JSON response
+    # Parse LLM JSON response - only expects value and word_indexes
     parsed_response = _parse_llm_response(llm_response, template)
 
-    # Convert start/end indexes to word_indexes arrays
+    # Map word_indexes to line_numbers using line_metadata
+    # LLMWhisperer returns line-level bounding boxes, not word-level
+    # We map word indexes to line numbers for line-level highlighting
+    line_metadata = _extract_line_metadata(bounding_boxes)
+    
     result_fields = {}
     for field_key, field_data in parsed_response.items():
-        start = field_data.get("start")
-        end = field_data.get("end")
         value = field_data.get("value")
-
-        # Generate word_indexes array from start/end
-        # Only populate if bounding_boxes are available and valid
-        word_indexes = []
-        if bounding_boxes and start is not None and end is not None:
-            # Ensure start <= end and both are integers
-            try:
-                start_int = int(start)
-                end_int = int(end)
-                if start_int <= end_int:
-                    word_indexes = list(range(start_int, end_int + 1))
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid start/end for field {field_key}: start={start}, end={end}")
-
+        word_indexes = field_data.get("word_indexes", [])
+        
+        # Map word_indexes to line_numbers
+        line_numbers = map_word_indexes_to_line_numbers(word_indexes, line_metadata, text)
+        
         result_fields[field_key] = {
             "value": value if value is not None else "",
-            "start": start,
-            "end": end,
             "word_indexes": word_indexes,
+            "line_numbers": line_numbers,
         }
 
     return {"fields": result_fields}
 
 
 def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
-    """Build prompt for LLM extraction."""
+    """
+    Build prompt for LLM extraction.
+    
+    NOTE: We only extract VALUES, not positional metadata (start/end).
+    Word index mapping is done backend-side using LLMWhisperer highlight data.
+    This is because LLMWhisperer returns line-level bounding boxes, not word-level,
+    so we map word indexes to line numbers for highlighting.
+    """
     template_keys = list(template.keys())
     template_keys_json = json.dumps(template_keys, indent=2)
 
-    # Split text to show word indexing
-    words = text.split()
-    word_count = len(words)
-
     prompt_parts = [
-        "Extract field values from the following layout-preserving text.",
+        "Extract field VALUES ONLY from the following layout-preserving text.",
         "",
         "Template field keys (extract ONLY these fields):",
         template_keys_json,
         "",
-        f"Layout-preserving text (contains {word_count} words when split on whitespace):",
+        "Layout-preserving text:",
         text,
         "",
         "Return STRICT JSON in this exact format:",
         "{",
         '  "field_key": {',
         '    "value": "extracted value or null if not found",',
-        '    "start": word_index_start or null,',
-        '    "end": word_index_end or null',
+        '    "word_indexes": [0, 1, 2, ...] or []',
         "  },",
         "  ...",
         "}",
         "",
         "Rules:",
         "- Never invent fields not in the template.",
-        "- If a value is not found, return value=null, start=null, end=null.",
-        "- Word indexes are 0-based: first word = 0, second word = 1, etc.",
-        f"- Valid word index range: 0 to {word_count - 1} (inclusive).",
-        "- start and end must refer to word indexes when the text is split on whitespace.",
-        "- For multi-word values, start is the first word index and end is the last word index (inclusive).",
+        "- If a value is not found, return value=null, word_indexes=[].",
+        "- word_indexes should be an array of word indexes (0-based) where the value appears.",
+        "- Split the text on whitespace to determine word indexes.",
+        "- For multi-word values, include all word indexes in the array.",
+        "- If you cannot determine word indexes, return an empty array [].",
+        "- Extract ONLY the value - do not compute character positions.",
         "- No explanations, no prose, only JSON.",
     ]
 
@@ -196,7 +196,12 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
 
 
 def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse LLM JSON response safely."""
+    """
+    Parse LLM JSON response safely.
+    
+    NOTE: We only expect value and word_indexes, not start/end.
+    Positional metadata is no longer extracted from Groq.
+    """
     cleaned = response_text.strip()
 
     # Remove markdown code blocks if present
@@ -231,19 +236,29 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
 
         if not isinstance(field_data, dict):
             logger.warning(f"Invalid field data format for {field_key}: {type(field_data)}")
-            result[field_key] = {"value": None, "start": None, "end": None}
+            result[field_key] = {"value": None, "word_indexes": []}
             continue
+
+        # Extract value and word_indexes only
+        word_indexes = field_data.get("word_indexes", [])
+        if not isinstance(word_indexes, list):
+            word_indexes = []
+        else:
+            # Ensure all are integers
+            try:
+                word_indexes = [int(idx) for idx in word_indexes if isinstance(idx, (int, str))]
+            except (ValueError, TypeError):
+                word_indexes = []
 
         result[field_key] = {
             "value": field_data.get("value"),
-            "start": field_data.get("start"),
-            "end": field_data.get("end"),
+            "word_indexes": word_indexes,
         }
 
     # Ensure all template fields are present
     for key in template_keys:
         if key not in result:
-            result[key] = {"value": None, "start": None, "end": None}
+            result[key] = {"value": None, "word_indexes": []}
 
     return result
 
@@ -253,12 +268,110 @@ def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
     return {
         key: {
             "value": "",
-            "start": None,
-            "end": None,
             "word_indexes": [],
         }
         for key in template.keys()
     }
+
+
+def _extract_line_metadata(bounding_boxes: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract line metadata from bounding boxes.
+    
+    LLMWhisperer returns line_metadata which contains line-level bounding boxes,
+    not word-level. Each line has a line number and bounding box coordinates.
+    """
+    if not bounding_boxes or not isinstance(bounding_boxes, dict):
+        return []
+    
+    line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
+    if isinstance(line_metadata, list):
+        return line_metadata
+    
+    return []
+
+
+def map_word_indexes_to_line_numbers(
+    word_indexes: List[int], line_metadata: List[Dict[str, Any]], text: str
+) -> List[int]:
+    """
+    Map word indexes to line numbers.
+    
+    LLMWhisperer returns line-level bounding boxes, not word-level.
+    This function determines which line(s) contain the specified word indexes.
+    
+    Args:
+        word_indexes: List of word indexes (0-based, from splitting text on whitespace)
+        line_metadata: Line metadata from LLMWhisperer (contains line numbers and word ranges)
+        text: The full text (split by lines to match line numbers)
+        
+    Returns:
+        Sorted list of unique line numbers (1-based) that contain the word indexes
+    """
+    if not word_indexes or not line_metadata:
+        return []
+    
+    # Split text into words for indexing
+    words = text.split()
+    
+    # Build a mapping from word index to line number
+    # We need to determine which line each word belongs to
+    word_to_line: Dict[int, int] = {}
+    
+    # Process line metadata to find word ranges
+    for line_data in line_metadata:
+        if not isinstance(line_data, dict):
+            continue
+        
+        line_number = line_data.get("line_no") or line_data.get("line_number") or line_data.get("line")
+        if line_number is None:
+            continue
+        
+        # Try to find word range for this line
+        # LLMWhisperer may provide word_start and word_end, or we can infer from line position
+        word_start = line_data.get("word_start") or line_data.get("start_word_index")
+        word_end = line_data.get("word_end") or line_data.get("end_word_index")
+        
+        if word_start is not None and word_end is not None:
+            # Map all words in this range to this line
+            for word_idx in range(int(word_start), int(word_end) + 1):
+                word_to_line[word_idx] = int(line_number)
+        else:
+            # Fallback: try to match by line text
+            line_text = line_data.get("text", "")
+            if line_text:
+                # Find where this line's text appears in the full text
+                # This is approximate but better than nothing
+                line_words = line_text.split()
+                if line_words:
+                    # Try to find the first word of this line in the full word list
+                    first_word = line_words[0]
+                    for idx, word in enumerate(words):
+                        if word == first_word:
+                            # Map words of this line
+                            for i, _ in enumerate(line_words):
+                                if idx + i < len(words):
+                                    word_to_line[idx + i] = int(line_number)
+                            break
+    
+    # If we couldn't build word-to-line mapping, try alternative approach
+    if not word_to_line:
+        # Fallback: split text by lines and assign word indexes sequentially
+        lines = text.split("\n")
+        word_idx = 0
+        for line_num, line in enumerate(lines, start=1):
+            line_words = line.split()
+            for _ in line_words:
+                word_to_line[word_idx] = line_num
+                word_idx += 1
+    
+    # Map the requested word indexes to line numbers
+    line_numbers = set()
+    for word_idx in word_indexes:
+        if word_idx in word_to_line:
+            line_numbers.add(word_to_line[word_idx])
+    
+    return sorted(list(line_numbers))
 
 
 # Existing functions for bounding box merging (kept for backward compatibility)

@@ -30,9 +30,8 @@ class FieldData(BaseModel):
     """Model for individual field data."""
 
     value: str
-    start: Optional[int] = None
-    end: Optional[int] = None
     word_indexes: list[int] = Field(default_factory=list)
+    line_numbers: list[int] = Field(default_factory=list)  # Line numbers for highlighting
 
 
 class ExtractFieldsResponse(BaseModel):
@@ -92,16 +91,16 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         for field_key, field_data in result.get("fields", {}).items():
             fields_dict[field_key] = FieldData(
                 value=field_data.get("value", ""),
-                start=field_data.get("start"),
-                end=field_data.get("end"),
                 word_indexes=field_data.get("word_indexes", []),
+                line_numbers=field_data.get("line_numbers", []),
             )
 
         logger.info(f"Successfully extracted {len(fields_dict)} fields")
         
-        # Save structured fields to output_files/
-        # Note: Original filename is not available in this endpoint, so we use a hash-based identifier
-        # In production, consider adding filename as an optional parameter to the request
+        # Save structured fields to output_files/ as 04_<filename>_structured.json
+        # NOTE: Each field now includes line_numbers for line-level highlighting
+        # LLMWhisperer returns line-level bounding boxes, so we highlight entire lines
+        # Note: Original filename is not available in this endpoint, so we use a hash-based filename
         try:
             import hashlib
             # Try to extract whisperHash from boundingBoxes if available
@@ -117,7 +116,9 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
                 filename = f"extracted_{text_hash}"
             
             structured_path = get_output_path(filename, suffix="_structured", prefix="04")
+            # Save with line_numbers included for each field
             save_json(structured_path, {"fields": {k: v.dict() for k, v in fields_dict.items()}})
+            logger.info("Saved structured fields to %s", structured_path)
         except Exception as e:
             logger.warning(f"Failed to save structured fields: {e}")
             # Continue processing even if saving fails

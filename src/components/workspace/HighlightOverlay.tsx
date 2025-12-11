@@ -3,9 +3,12 @@ import { BoundingBox } from "@/types/document";
 import { useCallback, useMemo, useEffect, useRef, useState } from "react";
 
 interface HighlightOverlayProps {
-  // New API: word index-based highlighting
-  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend
-  selectedIndexes?: number[]; // Word indexes to highlight (preview/hover)
+  // New API: line number-based highlighting
+  // NOTE: LLMWhisperer returns line-level bounding boxes, not word-level
+  // We highlight entire lines based on line_numbers (1-based)
+  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains line_metadata)
+  selectedIndexes?: number[]; // Word indexes (legacy, for backward compatibility)
+  activeLineNumbers?: number[]; // Line numbers to highlight (1-based) - PRIMARY METHOD
   pdfPageRefs?: React.RefObject<HTMLCanvasElement>[]; // Array of page canvas refs
   currentScale?: number; // Current zoom scale
   pageMetadata?: Array<{
@@ -199,6 +202,7 @@ function buildIndexLookup(boundingBoxes: Record<string, unknown>): Map<number, B
 export function HighlightOverlay({
   boundingBoxes,
   selectedIndexes = [],
+  activeLineNumbers = [],
   pdfPageRefs = [],
   currentScale = 1,
   pageMetadata = [],
@@ -218,14 +222,76 @@ export function HighlightOverlay({
   // Determine which API to use - use new API if boundingBoxes is provided
   const useNewAPI = boundingBoxes !== undefined;
 
-  // Convert word indexes to bounding boxes (new API)
+  // Extract line metadata from bounding boxes
+  // LLMWhisperer returns line-level bounding boxes in line_metadata
+  const lineMetadata = useMemo(() => {
+    if (!boundingBoxes || typeof boundingBoxes !== "object") return [];
+    
+    // Try different possible keys for line metadata
+    const lines = (boundingBoxes as any).line_metadata || 
+                  (boundingBoxes as any).lines || 
+                  (boundingBoxes as any).lineMetadata;
+    
+    return Array.isArray(lines) ? lines : [];
+  }, [boundingBoxes]);
+
+  // Convert line numbers to bounding boxes (PRIMARY METHOD)
+  // LLMWhisperer returns line-level boxes, so we highlight entire lines
+  const lineNumbersToBoxes = useMemo(() => {
+    if (!useNewAPI || !lineMetadata.length || !activeLineNumbers.length) return [];
+
+    const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
+    const uniqueLineNumbers = Array.from(new Set(activeLineNumbers));
+
+    uniqueLineNumbers.forEach((lineNumber) => {
+      // Find line in metadata (line numbers are 1-based)
+      const lineData = lineMetadata.find((line: any) => {
+        const lineNo = line.line_no || line.line_number || line.line;
+        return lineNo === lineNumber;
+      });
+
+      if (lineData && typeof lineData === "object") {
+        // Extract bounding box from line data
+        const bbox = lineData.bbox || lineData.bounding_box || lineData.box || lineData.raw_box;
+        if (bbox) {
+          let page = 1;
+          let x = 0;
+          let y = 0;
+          let width = 0;
+          let height = 0;
+
+          if (Array.isArray(bbox) && bbox.length >= 4) {
+            // Format: [page, base_y, height, page_height]
+            page = bbox[0] || 1;
+            y = bbox[1] || 0;
+            height = bbox[2] || 0;
+            // Width would need to be extracted from page width or line text
+            width = 500; // Default width, should be adjusted based on page width
+          } else if (typeof bbox === "object") {
+            page = bbox.page || bbox.pageNumber || 1;
+            x = bbox.x || bbox.left || 0;
+            y = bbox.y || bbox.top || bbox.base_y || 0;
+            width = bbox.width || bbox.right - bbox.left || 500;
+            height = bbox.height || bbox.bottom - bbox.top || 0;
+          }
+
+          if (width > 0 && height > 0) {
+            boxes.push({ x, y, width, height, page });
+          }
+        }
+      }
+    });
+
+    return boxes;
+  }, [useNewAPI, lineMetadata, activeLineNumbers]);
+
+  // Convert word indexes to bounding boxes (legacy fallback)
   const wordIndexesToBoxes = useMemo(() => {
-    if (!useNewAPI || !boundingBoxes) return [];
+    if (!useNewAPI || !boundingBoxes || !selectedIndexes.length) return [];
 
     const lookup = buildIndexLookup(boundingBoxes);
     const boxes: Array<{ x: number; y: number; width: number; height: number; page: number }> = [];
 
-    // Get unique indexes (can be empty for active highlights)
     const uniqueIndexes = Array.from(new Set(selectedIndexes || []));
 
     uniqueIndexes.forEach((index) => {
@@ -239,10 +305,13 @@ export function HighlightOverlay({
   }, [useNewAPI, boundingBoxes, selectedIndexes]);
 
   // Merge overlapping boxes (new API)
+  // Prefer line-based boxes over word-based boxes
   const mergedHighlights = useMemo(() => {
     if (!useNewAPI) return [];
-    return mergeBoxes(wordIndexesToBoxes);
-  }, [useNewAPI, wordIndexesToBoxes]);
+    // Use line-based boxes if available, otherwise fall back to word-based
+    const boxesToMerge = lineNumbersToBoxes.length > 0 ? lineNumbersToBoxes : wordIndexesToBoxes;
+    return mergeBoxes(boxesToMerge);
+  }, [useNewAPI, lineNumbersToBoxes, wordIndexesToBoxes]);
 
   // Calculate page offsets for positioning (new API)
   const pageOffsets = useMemo(() => {
@@ -415,13 +484,35 @@ export function HighlightOverlay({
   }, [useNewAPI, boundingBoxes, selectedIndexes, currentScale, pageOffsets, pageMetadata, effectiveActiveHighlightId]);
 
   const activeHighlights = useMemo(() => {
-    // Active highlights are shown when activeHighlightId is set
-    // They use the same selectedIndexes but with different styling
+    // Active highlights are shown when activeHighlightId is set OR activeLineNumbers are provided
+    // Use line-based highlights if available
+    if (activeLineNumbers.length > 0 && lineNumbersToBoxes.length > 0) {
+      // Map line-based boxes to positioned highlights
+      return lineNumbersToBoxes.map((box, idx) => {
+        const pageIndex = box.page - 1;
+        const pageMeta = pageMetadata[pageIndex];
+        if (!pageMeta) return null;
+
+        const pageOffset = pageOffsets[pageIndex] || 0;
+        const pageHeight = pageMeta.height;
+        const flippedY = pageHeight - box.y - box.height;
+
+        return {
+          id: `line-${activeLineNumbers[idx]}-${idx}`,
+          x: box.x * currentScale,
+          y: flippedY * currentScale + pageOffset,
+          width: box.width * currentScale,
+          height: box.height * currentScale,
+          page: box.page,
+        };
+      }).filter((h): h is MergedHighlight => h !== null);
+    }
+    
     if (!effectiveActiveHighlightId) return [];
     
     // Return all positioned highlights when active (they're already filtered by selectedIndexes)
     return positionedHighlights;
-  }, [positionedHighlights, effectiveActiveHighlightId]);
+  }, [positionedHighlights, effectiveActiveHighlightId, activeLineNumbers, lineNumbersToBoxes, pageMetadata, pageOffsets, currentScale]);
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">

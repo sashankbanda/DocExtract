@@ -12,9 +12,12 @@ interface PDFViewerWrapperProps {
   documentId: string;
   fileName?: string;
   pdfSource?: string | File | ArrayBuffer | Uint8Array; // URL, File, or ArrayBuffer
-  // New API: for word index-based highlighting
-  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend
-  selectedIndexes?: number[]; // Word indexes to highlight
+  // New API: for line number-based highlighting
+  // NOTE: LLMWhisperer returns line-level bounding boxes, not word-level
+  // We use line_numbers for highlighting instead of word_indexes
+  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains line_metadata)
+  selectedIndexes?: number[]; // Word indexes (legacy, for backward compatibility)
+  activeLineNumbers?: number[]; // Line numbers to highlight (1-based)
   activeHighlightId?: string | null; // ID of active highlight
   // Legacy API: for direct bounding box highlighting (backward compatibility)
   highlights?: BoundingBox[];
@@ -42,6 +45,7 @@ function PDFViewerWrapper({
   pdfSource,
   boundingBoxes,
   selectedIndexes = [],
+  activeLineNumbers = [],
   activeHighlightId = null,
   highlights = [],
   activeHighlight,
@@ -614,10 +618,13 @@ function PDFViewerWrapper({
                   }}
                 >
                   {/* Use new API if boundingBoxes is provided */}
+                  {/* NOTE: We now use line_numbers for highlighting, not word_indexes */}
+                  {/* LLMWhisperer returns line-level bounding boxes, so we highlight entire lines */}
                   {boundingBoxes ? (
                     <HighlightOverlay
                       boundingBoxes={boundingBoxes}
                       selectedIndexes={selectedIndexes}
+                      activeLineNumbers={activeLineNumbers}
                       pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
                         const canvas = canvasRefsRef.current.get(i + 1);
                         return { current: canvas } as React.RefObject<HTMLCanvasElement>;

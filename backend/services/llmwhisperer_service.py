@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict
 
 import httpx
@@ -36,10 +37,17 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
             detail=f"'{upload_file.filename}' is empty.",
         )
 
-    # Save original file to input_files/
+    # Save original file to input_files/ as 01_<filename> (raw file, no extension change)
+    # This preserves the original uploaded file for reference
     try:
         input_path = get_input_path(upload_file.filename or "unknown", prefix="01")
+        # Add original extension if it exists
+        if upload_file.filename:
+            original_ext = Path(upload_file.filename).suffix
+            if original_ext:
+                input_path = input_path.with_suffix(original_ext)
         save_bytes(input_path, file_bytes)
+        logger.info("Saved input file to %s", input_path)
     except Exception as e:
         logger.warning(f"Failed to save input file: {e}")
         # Continue processing even if saving fails

@@ -32,16 +32,28 @@ export function TemplateFieldsPanel({
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const handleFieldClick = (key: string, wordIndexes: number[]) => {
-    if (onFieldClick && wordIndexes.length > 0) {
-      onFieldClick(wordIndexes);
+  const handleFieldClick = (key: string, lineNumbers: number[], wordIndexes: number[]) => {
+    // Prefer line_numbers for highlighting, fallback to word_indexes
+    if (onFieldClick) {
+      if (lineNumbers.length > 0) {
+        onFieldClick(lineNumbers);
+      } else if (wordIndexes.length > 0) {
+        onFieldClick(wordIndexes);
+      }
     }
   };
 
-  const handleFieldHover = (key: string | null, wordIndexes: number[] | null) => {
+  const handleFieldHover = (key: string | null, lineNumbers: number[] | null, wordIndexes: number[] | null) => {
     setHoveredField(key);
+    // Prefer line_numbers for highlighting
     if (onFieldHover) {
-      onFieldHover(wordIndexes);
+      if (lineNumbers && lineNumbers.length > 0) {
+        onFieldHover(lineNumbers);
+      } else if (wordIndexes) {
+        onFieldHover(wordIndexes);
+      } else {
+        onFieldHover(null);
+      }
     }
   };
 
@@ -55,12 +67,14 @@ export function TemplateFieldsPanel({
   }, [structuredFields]);
 
   // Convert structuredFields object to array of entries
+  // Use line_numbers for highlighting (LLMWhisperer returns line-level boxes, not word-level)
   const fields = structuredFields
     ? Object.entries(structuredFields)
         .map(([key, data]) => ({
           key,
           value: data.value || "",
           word_indexes: data.word_indexes || [],
+          line_numbers: data.line_numbers || [],
         }))
         .filter((field) => field.value !== null && field.value !== "")
     : [];
@@ -103,7 +117,7 @@ export function TemplateFieldsPanel({
       <AnimatePresence mode="popLayout">
         {fields.map((field, index) => {
           const isHovered = hoveredField === field.key;
-          const hasWordIndexes = field.word_indexes.length > 0;
+          const hasHighlight = field.line_numbers.length > 0 || field.word_indexes.length > 0;
           return (
             <motion.div
               key={`${field.key}-${index}`}
@@ -120,15 +134,15 @@ export function TemplateFieldsPanel({
               }}
               className={cn(
                 "p-4 rounded-xl glass transition-all duration-200 relative border border-transparent",
-                hasWordIndexes && "cursor-pointer hover:bg-[hsl(var(--glass-bg)/0.8)] hover:border-primary/30",
-                isHovered && hasWordIndexes && "shadow-lg shadow-primary/10 border-primary/50"
+                hasHighlight && "cursor-pointer hover:bg-[hsl(var(--glass-bg)/0.8)] hover:border-primary/30",
+                isHovered && hasHighlight && "shadow-lg shadow-primary/10 border-primary/50"
               )}
-              onMouseEnter={() => handleFieldHover(field.key, field.word_indexes)}
-              onMouseLeave={() => handleFieldHover(null, null)}
-              onClick={() => handleFieldClick(field.key, field.word_indexes)}
+              onMouseEnter={() => handleFieldHover(field.key, field.line_numbers, field.word_indexes)}
+              onMouseLeave={() => handleFieldHover(null, null, null)}
+              onClick={() => handleFieldClick(field.key, field.line_numbers, field.word_indexes)}
             >
               {/* Subtle hover animation glow */}
-              {hasWordIndexes && (
+              {hasHighlight && (
                 <motion.div
                   className="absolute inset-0 rounded-xl bg-primary/5 pointer-events-none"
                   initial={{ opacity: 0 }}
