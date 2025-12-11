@@ -114,8 +114,10 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     # (which has the correct structure for _generate_word_level_boxes)
     if bounding_boxes:
         bounding_boxes = highlight_response
+        logger.info("Using line_metadata from highlight API")
     else:
         # Fallback: extract from extraction result and wrap in dict structure
+        logger.warning("Highlight API returned no line_metadata, using fallback generation from extraction result")
         line_metadata = _extract_nested(extraction, "line_metadata")
         if line_metadata:
             bounding_boxes = {"line_metadata": line_metadata}
@@ -125,7 +127,10 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     # Generate word-level boxes from line-level boxes
     # LLMWhisperer returns line-level boxes, we need word-level for precise highlighting
     if bounding_boxes and result_text:
+        n_lines_before = len(bounding_boxes.get("line_metadata", [])) if isinstance(bounding_boxes, dict) else 0
         bounding_boxes = _generate_word_level_boxes(bounding_boxes, result_text)
+        n_words_after = len(bounding_boxes.get("words", [])) if isinstance(bounding_boxes, dict) else 0
+        logger.info(f"Generated {n_words_after} word boxes from {n_lines_before} lines for {upload_file.filename or 'unknown'}")
     
     return {
         "file_name": upload_file.filename or "unknown",
@@ -303,17 +308,21 @@ def _generate_word_level_boxes(
     """
     Generate word-level bounding boxes from line-level boxes.
     
-    LLMWhisperer returns line-level boxes. We split each line into words
-    and proportionally segment the bounding box based on text widths.
+    Handles cases where raw_box is null by generating boxes from line_metadata.
+    Uses proportional width calculation based on character count.
     
     Args:
-        bounding_boxes: Line-level bounding box data from LLMWhisperer
-        text: The layout-preserving text
+        bounding_boxes: Line-level bounding box data (must have line_metadata)
+        text: The layout-preserving text with hex line numbers
         
     Returns:
-        Dictionary with word-level boxes: {word_index: {page, x, y, width, height}}
+        Dictionary with word-level boxes and updated line_metadata:
+        {
+            "words": [{index, page, text, bbox: {x, y, width, height}}],
+            "line_metadata": [...]  # with raw_box populated
+        }
     """
-    word_boxes: Dict[str, Dict[str, float]] = {}
+    import re
     
     # Extract line metadata
     line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
@@ -321,26 +330,28 @@ def _generate_word_level_boxes(
         logger.warning("No line_metadata found, cannot generate word-level boxes")
         return bounding_boxes
     
-    # Split text into words (preserving order for word index)
-    # Remove hex line numbers from text for word indexing
-    import re
-    text_clean = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', text)
-    all_words = text_clean.split()
-    word_index = 0
+    words_output: List[Dict[str, Any]] = []
+    global_word_index = 0
+    updated_line_metadata: List[Dict[str, Any]] = []
     
     # Process each line
     for line_data in line_metadata:
         if not isinstance(line_data, dict):
+            updated_line_metadata.append(line_data)
             continue
         
-        # Get line text and bounding box
-        line_text = line_data.get("text", "")
-        line_no = line_data.get("line_no") or line_data.get("line_number") or line_data.get("line")
+        # Get line text - remove hex line numbers for word extraction
+        line_text_raw = line_data.get("text", "")
+        line_text = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', line_text_raw).strip()
         
-        # Extract bounding box
-        bbox = line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box") or line_data.get("raw_box")
-        if not bbox:
+        # Skip empty lines
+        if not line_text:
+            updated_line_metadata.append(line_data)
             continue
+        
+        # Extract bounding box - prefer raw_box, fallback to bbox/bounding_box/box
+        raw_box = line_data.get("raw_box")
+        bbox = raw_box or line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box")
         
         # Parse bounding box format
         page = 1
@@ -348,83 +359,124 @@ def _generate_word_level_boxes(
         line_y = 0
         line_width = 0
         line_height = 0
+        page_height = 0
+        page_width = 0
         
-        if isinstance(bbox, list) and len(bbox) >= 4:
-            # Format: [page, base_y, height, page_height]
-            page = int(bbox[0]) if bbox[0] else 1
-            line_y = float(bbox[1]) if bbox[1] else 0
-            line_height = float(bbox[2]) if bbox[2] else 0
-            page_height = float(bbox[3]) if len(bbox) > 3 and bbox[3] else 0
-            # Estimate width based on page height (assuming standard page aspect ratio)
-            # For A4: width/height ≈ 0.707, so width ≈ height * 0.707
-            # Use page_height if available, otherwise estimate from line_height
-            if page_height > 0:
-                line_width = page_height * 0.707  # A4 aspect ratio
-            else:
-                line_width = line_height * 50  # Rough estimate
-            # Try to get actual width from line_data if available
+        if bbox:
+            if isinstance(bbox, list) and len(bbox) >= 4:
+                # Format: [page, base_y, height, page_height]
+                page = int(bbox[0]) if bbox[0] else 1
+                line_y = float(bbox[1]) if bbox[1] else 0
+                line_height = float(bbox[2]) if bbox[2] else 0
+                page_height = float(bbox[3]) if len(bbox) > 3 and bbox[3] else 0
+                # Estimate width from page height (A4 aspect ratio ≈ 0.707)
+                if page_height > 0:
+                    page_width = page_height * 0.707
+                    line_width = page_width  # Full line width
+                else:
+                    line_width = line_height * 50  # Rough estimate
+            elif isinstance(bbox, dict):
+                page = int(bbox.get("page", 1))
+                line_x = float(bbox.get("x", bbox.get("left", 0)))
+                line_y = float(bbox.get("y", bbox.get("top", bbox.get("base_y", 0))))
+                line_width = float(bbox.get("width", bbox.get("right", 0) - bbox.get("left", 0)))
+                line_height = float(bbox.get("height", bbox.get("bottom", 0) - bbox.get("top", 0)))
+                page_height = float(bbox.get("page_height", bbox.get("pageHeight", 0)))
+                page_width = float(bbox.get("page_width", bbox.get("pageWidth", 0)))
+        
+        # If no bbox found, try to infer from line_data fields
+        if line_width <= 0 or line_height <= 0:
+            # Try to get from line_data directly
             if "width" in line_data:
                 line_width = float(line_data["width"])
             elif "x" in line_data and "right" in line_data:
-                line_width = float(line_data["right"]) - float(line_data["x"])
+                line_x = float(line_data.get("x", 0))
+                line_width = float(line_data["right"]) - line_x
             elif "left" in line_data and "right" in line_data:
-                line_width = float(line_data["right"]) - float(line_data["left"])
-        elif isinstance(bbox, dict):
-            page = int(bbox.get("page", 1))
-            line_x = float(bbox.get("x", bbox.get("left", 0)))
-            line_y = float(bbox.get("y", bbox.get("top", bbox.get("base_y", 0))))
-            line_width = float(bbox.get("width", bbox.get("right", 0) - bbox.get("left", 0)))
-            line_height = float(bbox.get("height", bbox.get("bottom", 0) - bbox.get("top", 0)))
+                line_x = float(line_data.get("left", 0))
+                line_width = float(line_data["right"]) - line_x
+            
+            if "height" in line_data:
+                line_height = float(line_data["height"])
+            elif "y" in line_data or "base_y" in line_data:
+                line_y = float(line_data.get("y", line_data.get("base_y", 0)))
+            
+            page = int(line_data.get("page", line_data.get("page_number", 1)))
         
+        # If still no valid dimensions, skip this line
         if line_width <= 0 or line_height <= 0:
+            # Create a minimal raw_box for the line even if we can't generate words
+            if not raw_box:
+                updated_line = {**line_data, "raw_box": [page, line_y, line_height, page_height] if page_height > 0 else None}
+            else:
+                updated_line = line_data
+            updated_line_metadata.append(updated_line)
             continue
         
-        # Split line into words
+        # Split line into words (preserve punctuation attached to tokens)
         line_words = line_text.split()
         if not line_words:
+            # No words, but ensure raw_box is set
+            if not raw_box:
+                updated_line = {**line_data, "raw_box": [page, line_y, line_height, page_height] if page_height > 0 else [page, line_y, line_height, 0]}
+            else:
+                updated_line = line_data
+            updated_line_metadata.append(updated_line)
             continue
         
         # Calculate proportional widths for each word
-        # Estimate width based on character count (rough approximation)
         total_chars = sum(len(word) for word in line_words)
         if total_chars == 0:
-            continue
+            total_chars = len(line_words)  # Fallback: equal width
         
         current_x = line_x
         for word in line_words:
             # Proportional width based on character count
-            word_width_ratio = len(word) / total_chars
-            word_width = line_width * word_width_ratio
+            word_width_ratio = len(word) / total_chars if total_chars > 0 else 1.0 / len(line_words)
+            word_width = round(line_width * word_width_ratio)
             
-            # Store word-level box
-            word_boxes[str(word_index)] = {
-                "page": float(page),
-                "x": current_x,
-                "y": line_y,
-                "width": word_width,
-                "height": line_height,
-            }
+            # Ensure minimum width
+            if word_width < 1:
+                word_width = 1
+            
+            # Store word-level box with text
+            words_output.append({
+                "index": global_word_index,
+                "page": page,
+                "text": word,
+                "bbox": {
+                    "x": current_x,
+                    "y": line_y,
+                    "width": word_width,
+                    "height": line_height,
+                }
+            })
             
             current_x += word_width
-            word_index += 1
+            global_word_index += 1
+        
+        # Ensure raw_box is populated for the line
+        if not raw_box:
+            raw_box = [page, line_y, line_height, page_height] if page_height > 0 else [page, line_y, line_height, 0]
+        
+        updated_line = {**line_data, "raw_box": raw_box}
+        updated_line_metadata.append(updated_line)
     
-    # Return word-level boxes in the expected format
-    return {
-        "words": [
-            {
-                "index": int(idx),
-                "page": int(box["page"]),
-                "bbox": {
-                    "x": box["x"],
-                    "y": box["y"],
-                    "width": box["width"],
-                    "height": box["height"],
-                }
-            }
-            for idx, box in word_boxes.items()
-        ],
-        "line_metadata": line_metadata,  # Keep original for reference
+    # Log generation results
+    logger.info(f"Generated {len(words_output)} word boxes from {len(line_metadata)} lines")
+    
+    # Return both word-level boxes and updated line_metadata
+    result = {
+        "words": words_output,
+        "line_metadata": updated_line_metadata,
     }
+    
+    # Preserve other keys from original bounding_boxes
+    for key in bounding_boxes:
+        if key not in {"words", "line_metadata", "lines"}:
+            result[key] = bounding_boxes[key]
+    
+    return result
 
 
 async def get_highlight_data(

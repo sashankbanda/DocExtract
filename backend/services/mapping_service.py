@@ -130,8 +130,21 @@ async def extract_fields_from_text(
     parsed_response = _parse_llm_response(llm_response, template)
 
     # Map field values to word indexes using exact string matching
-    # Groq only extracts values, we determine word_indexes backend-side
-    tokenized_text = text.split()  # Split on whitespace for word indexing
+    # Use bounding_boxes.words if available (more reliable than tokenized text)
+    words_list = []
+    if isinstance(bounding_boxes, dict):
+        words = bounding_boxes.get("words") or []
+        if isinstance(words, list):
+            # Build ordered list of word texts from bounding_boxes.words
+            words_list = [word.get("text", "").strip() if isinstance(word, dict) else str(word).strip() for word in words]
+    
+    # Fallback to tokenized text if words not available
+    if not words_list:
+        # Remove hex line numbers and split
+        import re
+        text_clean = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', text)
+        words_list = text_clean.split()
+        logger.warning("Using fallback tokenized text for word matching (bounding_boxes.words not available)")
     
     result_fields = {}
     for field_key, field_data in parsed_response.items():
@@ -144,8 +157,8 @@ async def extract_fields_from_text(
             continue
         
         # Find word indexes by exact string matching
-        # Search for the value in the tokenized text
-        word_indexes = _find_word_indexes_for_value(value, tokenized_text)
+        # Use words from bounding_boxes.words if available, otherwise use tokenized text
+        word_indexes = _find_word_indexes_for_value_from_words(value, words_list, bounding_boxes)
         
         result_fields[field_key] = {
             "value": str(value),
@@ -251,53 +264,111 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
     return result
 
 
-def _find_word_indexes_for_value(value: str, tokenized_text: List[str]) -> List[int]:
+def _find_word_indexes_for_value_from_words(
+    value: str, words_list: List[str], bounding_boxes: Dict[str, Any]
+) -> List[int]:
     """
     Find word indexes for a field value using exact string matching.
     
-    Searches for the value in the tokenized text and returns the word indexes.
+    Uses bounding_boxes.words if available (more reliable), otherwise uses words_list.
     Handles multi-word values by finding consecutive word matches.
     
     Args:
         value: The field value to find
-        tokenized_text: List of words from splitting text on whitespace
+        words_list: List of word texts (from bounding_boxes.words or tokenized text)
+        bounding_boxes: Bounding box data (to get word indexes from words array)
         
     Returns:
         List of word indexes (0-based) where the value appears
     """
-    if not value or not tokenized_text:
+    if not value or not words_list:
         return []
     
     # Normalize value: strip whitespace, handle case-insensitive matching
-    value_normalized = value.strip().lower()
+    value_normalized = value.strip()
     value_words = value_normalized.split()
     
     if not value_words:
         return []
     
-    # Search for the value in tokenized text
+    # Normalize words_list (trim whitespace, preserve case for exact match)
+    normalized_words = [w.strip() for w in words_list]
+    
+    # Try exact match first (case-sensitive, then case-insensitive)
     word_indexes = []
     
-    # Try to find exact match of all words
-    for i in range(len(tokenized_text) - len(value_words) + 1):
-        # Check if words match starting at position i
+    # First pass: exact case-sensitive match
+    for i in range(len(normalized_words) - len(value_words) + 1):
         match = True
         for j, value_word in enumerate(value_words):
-            if i + j >= len(tokenized_text):
+            if i + j >= len(normalized_words):
                 match = False
                 break
-            token_word = tokenized_text[i + j].strip().lower()
-            # Remove punctuation for comparison
-            token_word = ''.join(c for c in token_word if c.isalnum() or c.isspace())
-            value_word_clean = ''.join(c for c in value_word if c.isalnum() or c.isspace())
-            if token_word != value_word_clean:
+            if normalized_words[i + j] != value_word:
                 match = False
                 break
         
         if match:
-            # Found match, add all word indexes
+            # Found exact match - use indexes from bounding_boxes.words if available
+            if isinstance(bounding_boxes, dict):
+                words = bounding_boxes.get("words") or []
+                if isinstance(words, list) and i < len(words):
+                    # Get actual word indexes from bounding_boxes.words
+                    indexes = []
+                    for j in range(len(value_words)):
+                        if i + j < len(words):
+                            word_obj = words[i + j]
+                            if isinstance(word_obj, dict):
+                                word_idx = word_obj.get("index")
+                                if word_idx is not None:
+                                    indexes.append(int(word_idx))
+                    if indexes:
+                        return sorted(list(set(indexes)))
+            
+            # Fallback: use sequential indexes
             word_indexes.extend(range(i, i + len(value_words)))
-            break  # Take first match only
+            break
+    
+    # Second pass: case-insensitive match if exact match failed
+    if not word_indexes:
+        value_words_lower = [w.lower() for w in value_words]
+        normalized_words_lower = [w.lower() for w in normalized_words]
+        
+        for i in range(len(normalized_words_lower) - len(value_words_lower) + 1):
+            match = True
+            for j, value_word_lower in enumerate(value_words_lower):
+                if i + j >= len(normalized_words_lower):
+                    match = False
+                    break
+                # Remove punctuation for comparison
+                token_word = ''.join(c for c in normalized_words_lower[i + j] if c.isalnum() or c.isspace())
+                value_word_clean = ''.join(c for c in value_word_lower if c.isalnum() or c.isspace())
+                if token_word != value_word_clean:
+                    match = False
+                    break
+            
+            if match:
+                # Found fuzzy match - log warning
+                logger.warning(f"Fuzzy-match used for value '{value}' (case-insensitive/punctuation-normalized)")
+                
+                # Use indexes from bounding_boxes.words if available
+                if isinstance(bounding_boxes, dict):
+                    words = bounding_boxes.get("words") or []
+                    if isinstance(words, list) and i < len(words):
+                        indexes = []
+                        for j in range(len(value_words)):
+                            if i + j < len(words):
+                                word_obj = words[i + j]
+                                if isinstance(word_obj, dict):
+                                    word_idx = word_obj.get("index")
+                                    if word_idx is not None:
+                                        indexes.append(int(word_idx))
+                        if indexes:
+                            return sorted(list(set(indexes)))
+                
+                # Fallback: use sequential indexes
+                word_indexes.extend(range(i, i + len(value_words)))
+                break
     
     # Remove duplicates and sort
     return sorted(list(set(word_indexes)))
@@ -316,54 +387,10 @@ def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
 
 def _find_word_indexes_for_value(value: str, tokenized_text: List[str]) -> List[int]:
     """
-    Find word indexes for a field value using exact string matching.
-    
-    Searches for the value in the tokenized text and returns the word indexes.
-    Handles multi-word values by finding consecutive word matches.
-    
-    Args:
-        value: The field value to find
-        tokenized_text: List of words from splitting text on whitespace
-        
-    Returns:
-        List of word indexes (0-based) where the value appears
+    Legacy function - kept for backward compatibility.
+    Use _find_word_indexes_for_value_from_words instead.
     """
-    if not value or not tokenized_text:
-        return []
-    
-    # Normalize value: strip whitespace, handle case-insensitive matching
-    value_normalized = value.strip().lower()
-    value_words = value_normalized.split()
-    
-    if not value_words:
-        return []
-    
-    # Search for the value in tokenized text
-    word_indexes = []
-    
-    # Try to find exact match of all words
-    for i in range(len(tokenized_text) - len(value_words) + 1):
-        # Check if words match starting at position i
-        match = True
-        for j, value_word in enumerate(value_words):
-            if i + j >= len(tokenized_text):
-                match = False
-                break
-            token_word = tokenized_text[i + j].strip().lower()
-            # Remove punctuation for comparison
-            token_word = ''.join(c for c in token_word if c.isalnum() or c.isspace())
-            value_word_clean = ''.join(c for c in value_word if c.isalnum() or c.isspace())
-            if token_word != value_word_clean:
-                match = False
-                break
-        
-        if match:
-            # Found match, add all word indexes
-            word_indexes.extend(range(i, i + len(value_words)))
-            break  # Take first match only
-    
-    # Remove duplicates and sort
-    return sorted(list(set(word_indexes)))
+    return _find_word_indexes_for_value_from_words(value, tokenized_text, {})
 
 
 def _extract_line_metadata(bounding_boxes: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -47,8 +47,8 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
     This endpoint:
     1. Loads the specified template JSON
     2. Uses Groq LLM to extract field values from the text
-    3. Maps word indexes (start/end) to word_indexes arrays
-    4. Returns structured field data
+    3. Maps field values to word_indexes using exact string matching from bounding_boxes.words
+    4. Returns structured field data with word_indexes only (no start/end)
 
     Args:
         request: ExtractFieldsRequest with text, boundingBoxes, and optional templateName
@@ -96,8 +96,8 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         logger.info(f"Successfully extracted {len(fields_dict)} fields")
         
         # Save structured fields to output_files/ as 04_<filename>_structured.json
-        # NOTE: Each field now includes line_numbers for line-level highlighting
-        # LLMWhisperer returns line-level bounding boxes, so we highlight entire lines
+        # NOTE: Each field includes word_indexes for word-level highlighting
+        # Backend generates word-level boxes from line-level boxes returned by LLMWhisperer
         # Note: Original filename is not available in this endpoint, so we use a hash-based filename
         try:
             import hashlib
