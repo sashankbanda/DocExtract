@@ -101,18 +101,26 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     line_numbers = _parse_hex_line_numbers(result_text)
     
     # Get highlight data with exact line ranges (not "1-5000")
-    highlight_data = await get_highlight_data(
+    highlight_response = await get_highlight_data(
         whisper_hash=whisper_hash,
         line_numbers=line_numbers,
     )
     
-    # Extract bounding boxes: prefer highlight_data, fallback to extraction result
-    bounding_boxes = None
-    if highlight_data:
-        bounding_boxes = highlight_data.get("bounding_boxes") or highlight_data.get("line_metadata")
+    # Extract bounding boxes from highlight_response
+    # highlight_response is the full JSON dict from the API which contains line_metadata
+    bounding_boxes = highlight_response.get("line_metadata")
     
-    if not bounding_boxes:
-        bounding_boxes = _extract_nested(extraction, "line_metadata")
+    # If we have line_metadata from highlight API, use the full highlight_response dict
+    # (which has the correct structure for _generate_word_level_boxes)
+    if bounding_boxes:
+        bounding_boxes = highlight_response
+    else:
+        # Fallback: extract from extraction result and wrap in dict structure
+        line_metadata = _extract_nested(extraction, "line_metadata")
+        if line_metadata:
+            bounding_boxes = {"line_metadata": line_metadata}
+        else:
+            bounding_boxes = None
     
     # Generate word-level boxes from line-level boxes
     # LLMWhisperer returns line-level boxes, we need word-level for precise highlighting
