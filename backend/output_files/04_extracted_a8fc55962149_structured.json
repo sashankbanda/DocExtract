@@ -5,10 +5,11 @@
             "word_indexes": []
         },
         "insured": {
-            "value": "ABCAING HOMEC",
+            "value": "Gpt 40 mini",
             "word_indexes": [
-                17,
-                18
+                13,
+                14,
+                15
             ]
         },
         "dba": {
@@ -16,21 +17,21 @@
             "word_indexes": []
         },
         "policyNumber": {
-            "value": "P1234",
+            "value": "ABC123",
             "word_indexes": [
-                9
+                18
             ]
         },
         "effdate": {
-            "value": "6/1/2024",
+            "value": "10/31/3020",
             "word_indexes": [
-                12
+                21
             ]
         },
         "expdate": {
-            "value": "6/1/2025",
+            "value": "10/31/3021",
             "word_indexes": [
-                14
+                24
             ]
         },
         "carrier": {
@@ -38,72 +39,52 @@
             "word_indexes": []
         },
         "valuedDate": {
-            "value": "12/30/3023",
-            "word_indexes": [
-                231
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "claimNumber": {
-            "value": "123",
-            "word_indexes": [
-                42
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "claimant": {
-            "value": "SYDIA",
-            "word_indexes": [
-                95
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "claimStatus": {
-            "value": "O",
-            "word_indexes": [
-                96
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "closedDate": {
             "value": "",
             "word_indexes": []
         },
         "reportedDate": {
-            "value": "8/6/18",
-            "word_indexes": [
-                88
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "dateOfLoss": {
-            "value": "8/6/18",
-            "word_indexes": [
-                88
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "lossDescription": {
-            "value": "Some loss description",
-            "word_indexes": [
-                82,
-                83,
-                84
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "lossLocation": {
             "value": "",
             "word_indexes": []
         },
         "state": {
-            "value": "Yt",
-            "word_indexes": [
-                91
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "city": {
             "value": "",
             "word_indexes": []
         },
         "medicalPaid": {
-            "value": "$0",
-            "word_indexes": [
-                97
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "medicalPaid2": {
             "value": "",
@@ -114,10 +95,8 @@
             "word_indexes": []
         },
         "medicalReserves": {
-            "value": "$5,010",
-            "word_indexes": [
-                98
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "medicalReserves2": {
             "value": "",
@@ -128,10 +107,8 @@
             "word_indexes": []
         },
         "indemnityPaid": {
-            "value": "$0",
-            "word_indexes": [
-                97
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "indemnityPaid2": {
             "value": "",
@@ -154,10 +131,8 @@
             "word_indexes": []
         },
         "indemnityReserves": {
-            "value": "$10,000",
-            "word_indexes": [
-                99
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "indemnityReserves2": {
             "value": "",
@@ -228,18 +203,18 @@
             "word_indexes": []
         },
         "totalPaid": {
-            "value": "",
-            "word_indexes": []
+            "value": "$56.00",
+            "word_indexes": [
+                67
+            ]
         },
         "totalPaid2": {
             "value": "",
             "word_indexes": []
         },
         "totalReserve": {
-            "value": "$15,010",
-            "word_indexes": [
-                100
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "totalReserve2": {
             "value": "",
@@ -290,10 +265,8 @@
             "word_indexes": []
         },
         "pageNumber": {
-            "value": "1",
-            "word_indexes": [
-                1
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "sheetName": {
             "value": "",

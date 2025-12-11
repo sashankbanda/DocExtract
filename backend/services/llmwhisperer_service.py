@@ -67,7 +67,6 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     params = {
         "mode": "form",
         "output_mode": "layout_preserving",
-        "add_line_nos": "true",
     }
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
@@ -105,27 +104,24 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     
     # Get highlight data using SDK
     highlight_result = await get_highlight_data(whisper_hash)
-    
+
     if highlight_result and "line_metadata" in highlight_result:
         line_metadata = highlight_result["line_metadata"]
     else:
         logger.warning("No highlight metadata from SDK, using fallback generation.")
-        line_metadata = _extract_nested(extraction, "line_metadata") or []
+        line_metadata = []
     
-    # Normalize bounding_boxes structure
-    # Generate word-level boxes from line-level boxes
+    # Normalize bounding_boxes structure and generate words
     if line_metadata and result_text:
         words = _generate_word_level_boxes_from_line_metadata(line_metadata, result_text)
-        bounding_boxes = {
-            "line_metadata": line_metadata,
-            "words": words
-        }
-        logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines for {upload_file.filename or 'unknown'}")
     else:
-        bounding_boxes = {
-            "line_metadata": line_metadata,
-            "words": []
-        }
+        words = []
+
+    bounding_boxes = {
+        "line_metadata": line_metadata,
+        "words": words,
+    }
+    logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines for {upload_file.filename or 'unknown'}")
     
     return {
         "file_name": upload_file.filename or "unknown",
@@ -273,72 +269,76 @@ def _generate_word_level_boxes_from_line_metadata(
     line_metadata: List[Dict[str, Any]], text: str
 ) -> List[Dict[str, Any]]:
     """
-    Create word-level bounding boxes using real raw_box from highlight API.
-    
-    Args:
-        line_metadata: List of line metadata dicts with raw_box
-        text: The layout-preserving text (for reference, not used directly)
-        
-    Returns:
-        List of word boxes with index, page, text, bbox coordinates
+    Create word-level bounding boxes using raw_box + text splitting.
+    Uses per-character width based on raw_box width.
     """
-    words = []
+    import re
+
+    words: List[Dict[str, Any]] = []
     global_word_index = 0
-    
+
     for line in line_metadata:
         if not isinstance(line, dict):
             continue
-            
-        raw_box = line.get("raw_box")
+
+        raw_box = line.get("raw_box") or None
         if not raw_box or not isinstance(raw_box, list) or len(raw_box) < 4:
             continue
-        
-        page, base_y, height, page_height = raw_box[0], raw_box[1], raw_box[2], raw_box[3]
-        
+
+        # raw_box expected: [page, x_or_base_y, width_or_height, page_height]
+        page = raw_box[0]
+        raw_y = raw_box[1]
+        raw_height = raw_box[2]
+        raw_page_height = raw_box[3]
+
         line_text = line.get("text", "")
+        if not isinstance(line_text, str) or not line_text:
+            continue
+
+        # Strip hex prefixes like "0x07: "
+        line_text = re.sub(r"^0x[0-9A-Fa-f]+:\\s*", "", line_text).strip()
         if not line_text:
             continue
-        
-        # Remove hex line numbers for word extraction
-        import re
-        line_text = re.sub(r'0x[0-9A-Fa-f]+:\s*', '', line_text).strip()
-        
+
         tokens = line_text.split()
         if not tokens:
             continue
-        
-        # Compute per-word width
+
         total_chars = sum(len(t) for t in tokens)
         if total_chars == 0:
             continue
-        
-        # Estimate line width from page height (A4 aspect ratio)
-        if page_height > 0:
-            line_width = page_height * 0.707  # A4 aspect ratio
+
+        # Estimate line width; raw_box does not provide width explicitly.
+        # Use page_height as a proxy (A4 aspect ratio) else fall back to raw_height.
+        if raw_page_height:
+            line_width = float(raw_page_height) * 0.707
         else:
-            line_width = height * 50  # Rough estimate
-        
-        x_cursor = 0
+            line_width = float(raw_height)
+
+        width_per_char = line_width / total_chars if total_chars else 0
+        x_cursor = 0.0
+        y = float(raw_y)
+        height = float(raw_height) if raw_height else 0.0
+
         for token in tokens:
-            token_width_ratio = len(token) / total_chars
-            token_width = line_width * token_width_ratio
-            
-            words.append({
-                "index": global_word_index,
-                "text": token,
-                "page": int(page),
-                "bbox": {
-                    "x": x_cursor,
-                    "y": float(base_y),
-                    "width": token_width,
-                    "height": float(height),
-                },
-                "page_height": float(page_height) if page_height else 0
-            })
-            
+            token_width = width_per_char * len(token)
+            words.append(
+                {
+                    "index": global_word_index,
+                    "text": token,
+                    "page": int(page) if page is not None else 1,
+                    "bbox": {
+                        "x": x_cursor,
+                        "y": y,
+                        "width": token_width,
+                        "height": height,
+                    },
+                    "page_height": float(raw_page_height) if raw_page_height else 0,
+                }
+            )
             x_cursor += token_width
             global_word_index += 1
-    
+
     logger.info(f"Generated {len(words)} word boxes from {len(line_metadata)} lines.")
     return words
 
@@ -346,53 +346,57 @@ def _generate_word_level_boxes_from_line_metadata(
 async def get_highlight_data(whisper_hash: str) -> Optional[Dict[str, Any]]:
     """
     Fetch highlight bounding boxes using LLMWhisperer SDK V2.
-    
-    This completely replaces the old httpx-based highlight logic.
-    
-    Args:
-        whisper_hash: Whisper hash for the document
-        
-    Returns:
-        Dict with line_metadata, or None if API fails
+    Uses full line range and normalizes raw_box.
     """
     try:
-        # Always fetch a large range
-        line_range = "1-5000"
+        line_range = "0x01-0xFFFF"
         logger.info(f"Requesting highlight data via SDK for range {line_range}")
-        
+
         data = llmw_client.get_highlight_data(
             whisper_hash=whisper_hash,
-            lines=line_range
+            lines=line_range,
         )
-        
+
         if not data:
             logger.warning("Highlight data empty — fallback will be used.")
             return None
-        
-        line_metadata = []
-        
+
+        import re
+
+        line_metadata: List[Dict[str, Any]] = []
+
         for line_no, entry in data.items():
-            raw = entry.get("raw") or entry.get("raw_box")
-            
-            if not raw or len(raw) < 4:
-                logger.warning(f"Missing raw for line {line_no}, skipping.")
+            if not isinstance(entry, dict):
                 continue
-            
-            # raw = [page, base_y, height, page_height]
-            page = entry.get("page", raw[0])
-            base_y = entry.get("base_y", raw[1])
-            height = entry.get("height", raw[2])
-            page_height = entry.get("page_height", raw[3])
-            
-            line_metadata.append({
-                "line_no": line_no,
-                "raw_box": [page, base_y, height, page_height],
-                "text": entry.get("text", "")
-            })
-        
+
+            raw_box = entry.get("raw") or entry.get("raw_box") or None
+            if not raw_box or not isinstance(raw_box, list) or len(raw_box) < 4:
+                # Missing raw_box is not valid
+                logger.warning(f"Missing raw_box for line {line_no}, skipping.")
+                continue
+
+            page = entry.get("page", raw_box[0])
+            base_y = entry.get("base_y", raw_box[1])
+            height = entry.get("height", raw_box[2])
+            page_height = entry.get("page_height", raw_box[3])
+
+            line_text = entry.get("text", "")
+            if isinstance(line_text, str):
+                line_text = re.sub(r"^0x[0-9A-Fa-f]+:\\s*", "", line_text)
+            else:
+                line_text = ""
+
+            line_metadata.append(
+                {
+                    "line_no": line_no,
+                    "raw_box": [page, base_y, height, page_height],
+                    "text": line_text,
+                }
+            )
+
         logger.info(f"Received {len(line_metadata)} highlight lines from SDK.")
         return {"line_metadata": line_metadata}
-        
+
     except Exception as e:
         logger.error(f"Highlight SDK error: {e}")
         return None

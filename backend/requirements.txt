@@ -4,3 +4,5 @@ httpx==0.26.0
 python-dotenv==1.0.1
 python-multipart==0.0.9
 unstract-llmwhisperer-client
+llmwhisperer-client
+python-dotenv
