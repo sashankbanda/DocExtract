@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import List, Dict, Any, Optional
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
