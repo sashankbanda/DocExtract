@@ -62,8 +62,10 @@
             ]
         },
         "closedDate": {
-            "value": "",
-            "word_indexes": []
+            "value": "8/6/18",
+            "word_indexes": [
+                110
+            ]
         },
         "reportedDate": {
             "value": "8/6/18",
@@ -78,12 +80,8 @@
             ]
         },
         "lossDescription": {
-            "value": "Some loss description",
-            "word_indexes": [
-                103,
-                104,
-                105
-            ]
+            "value": "Some loss description about this loss.",
+            "word_indexes": []
         },
         "lossLocation": {
             "value": "",
@@ -114,8 +112,10 @@
             "word_indexes": []
         },
         "medicalReserves": {
-            "value": "",
-            "word_indexes": []
+            "value": "$5,010",
+            "word_indexes": [
+                120
+            ]
         },
         "medicalReserves2": {
             "value": "",
@@ -126,9 +126,9 @@
             "word_indexes": []
         },
         "indemnityPaid": {
-            "value": "$5,010",
+            "value": "$0",
             "word_indexes": [
-                120
+                119
             ]
         },
         "indemnityPaid2": {
@@ -234,18 +234,18 @@
             "word_indexes": []
         },
         "totalReserve": {
-            "value": "",
-            "word_indexes": []
+            "value": "$15,010",
+            "word_indexes": [
+                122
+            ]
         },
         "totalReserve2": {
             "value": "",
             "word_indexes": []
         },
         "totalIncurredSource": {
-            "value": "$15,010",
-            "word_indexes": [
-                122
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "recoveries": {
             "value": "",
