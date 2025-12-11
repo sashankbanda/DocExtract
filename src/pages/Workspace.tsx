@@ -1,5 +1,7 @@
+import { ExcelViewer } from "@/components/workspace/ExcelViewer";
 import { ExtractedTextPanel } from "@/components/workspace/ExtractedTextPanel";
 import { FileSelectorDropdown } from "@/components/workspace/FileSelectorDropdown";
+import { ImageViewer } from "@/components/workspace/ImageViewer";
 import { PDFViewerRef, PDFViewerWrapper } from "@/components/workspace/PDFViewerWrapper";
 import { StructuredTablePanel } from "@/components/workspace/StructuredTablePanel";
 import { TemplateFieldsPanel } from "@/components/workspace/TemplateFieldsPanel";
@@ -7,8 +9,9 @@ import { TwoPaneLayout } from "@/components/workspace/TwoPaneLayout";
 import { useExtractionContext } from "@/context/ExtractionContext";
 import { cn } from "@/lib/utils";
 import {
-    BoundingBox,
-    UploadedDocumentResult,
+  BoundingBox,
+  Citation,
+  UploadedDocumentResult,
 } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
 import { FileText, Loader2, Table, Tag, Upload } from "lucide-react";
@@ -32,8 +35,10 @@ export default function Workspace() {
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
   const [selectedLineIndexes, setSelectedLineIndexes] = useState<number[]>([]);
+  const [activeCitations, setActiveCitations] = useState<Citation[]>([]); // New state for citations
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const [isSwitchingFile, setIsSwitchingFile] = useState(false);
+  const [isDebugMode, setIsDebugMode] = useState(false); // Debug mode state
   const pdfViewerRef = useRef<PDFViewerRef>(null);
 
   // Reset highlights and scroll when file changes
@@ -54,6 +59,7 @@ export default function Workspace() {
         setSelectedFile(doc);
         // Reset highlights
         setSelectedLineIndexes([]);
+        setActiveCitations([]);
         setActiveHighlightId(null);
         setHoveredBoundingBox(null);
         setActiveBoundingBox(null);
@@ -76,13 +82,18 @@ export default function Workspace() {
     setSelectedLineIndexes(lineIndexes || []);
   }, []);
 
-  const handleLineClick = useCallback((lineIndexes: number[]) => {
+  const handleFieldClick = useCallback((lineIndexes: number[], citations: Citation[]) => {
     setSelectedLineIndexes(lineIndexes);
+    setActiveCitations(citations);
     setActiveHighlightId(`highlight-${Date.now()}`);
     
-    // Scroll to highlight
-    if (pdfViewerRef.current && lineIndexes.length > 0) {
-      pdfViewerRef.current.scrollToHighlight(lineIndexes);
+    // Scroll to citation (priority) or highlight
+    if (pdfViewerRef.current) {
+        if (citations.length > 0) {
+            pdfViewerRef.current.scrollToCitation(citations);
+        } else if (lineIndexes.length > 0) {
+            pdfViewerRef.current.scrollToHighlight(lineIndexes);
+        }
     }
     
     setTimeout(() => setActiveHighlightId(null), 2000);
@@ -157,7 +168,7 @@ export default function Workspace() {
         return selectedDocument ? (
           <ExtractedTextPanel
             document={selectedDocument}
-            onLineClick={handleLineClick}
+            onLineClick={(lines) => handleFieldClick(lines, [])} // Text panel only has lines for now
             onLineHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
@@ -168,7 +179,7 @@ export default function Workspace() {
         return (
           <StructuredTablePanel
             structuredFields={selectedDocument?.structuredFields}
-            onFieldClick={handleLineClick}
+            onFieldClick={handleFieldClick}
             onFieldHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
@@ -177,7 +188,7 @@ export default function Workspace() {
         return (
           <TemplateFieldsPanel
             structuredFields={selectedDocument?.structuredFields}
-            onFieldClick={handleLineClick}
+            onFieldClick={handleFieldClick}
             onFieldHover={handleLineHover}
             isLoading={isSwitchingFile}
           />
@@ -186,6 +197,12 @@ export default function Workspace() {
         return null;
     }
   };
+
+  const isExcel = selectedDocument?.fileName?.toLowerCase().endsWith(".xlsx") || 
+                  selectedDocument?.fileName?.toLowerCase().endsWith(".xls") ||
+                  selectedDocument?.fileName?.toLowerCase().endsWith(".csv");
+
+  const isImage = selectedDocument?.fileName?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp|tiff)$/);
 
   return (
     <div className="min-h-screen pt-16 relative">
@@ -208,17 +225,32 @@ export default function Workspace() {
 
       <TwoPaneLayout
         leftPane={
-          <PDFViewerWrapper
-            ref={pdfViewerRef}
-            documentId={selectedDocument?.id ?? ""}
-            fileName={selectedDocument?.fileName}
-            pdfSource={selectedDocument?.rawFile || null}
-            boundingBoxes={selectedDocument?.boundingBoxes}
-            selectedLineIndexes={selectedLineIndexes}
-            activeHighlightId={activeHighlightId}
-            highlights={allHighlights}
-            activeHighlight={activeBoundingBox}
-          />
+          isExcel && selectedDocument ? (
+            <ExcelViewer file={selectedDocument} />
+          ) : isImage && selectedDocument ? (
+            <ImageViewer 
+                file={selectedDocument}
+                boundingBoxes={selectedDocument?.boundingBoxes}
+                selectedLineIndexes={selectedLineIndexes}
+                citations={activeCitations}
+                activeHighlightId={activeHighlightId}
+                highlights={allHighlights}
+                activeHighlight={activeBoundingBox}
+            />
+          ) : (
+            <PDFViewerWrapper
+                ref={pdfViewerRef}
+                documentId={selectedDocument?.id ?? ""}
+                fileName={selectedDocument?.fileName}
+                pdfSource={selectedDocument?.rawFile || null}
+                boundingBoxes={selectedDocument?.boundingBoxes}
+                selectedLineIndexes={selectedLineIndexes}
+                citations={activeCitations}
+                activeHighlightId={activeHighlightId}
+                highlights={allHighlights}
+                activeHighlight={activeBoundingBox}
+            />
+          )
         }
         rightPane={
           <div className="h-full flex flex-col">
@@ -234,6 +266,21 @@ export default function Workspace() {
                   }
                 }}
               />
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-muted-foreground">Debug</label>
+                <button
+                    onClick={() => setIsDebugMode(!isDebugMode)}
+                    className={cn(
+                        "w-8 h-4 rounded-full transition-colors relative",
+                        isDebugMode ? "bg-red-500" : "bg-muted"
+                    )}
+                >
+                    <div className={cn(
+                        "absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform",
+                        isDebugMode ? "translate-x-4" : "translate-x-0"
+                    )} />
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center gap-1 p-4 border-b border-border/50">

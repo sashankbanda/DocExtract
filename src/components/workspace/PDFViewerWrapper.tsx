@@ -1,8 +1,8 @@
-import { BoundingBox } from "@/types/document";
+import { BoundingBox, Citation } from "@/types/document";
 import { motion } from "framer-motion";
 import { Loader2, Maximize2, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { HighlightOverlay } from "./HighlightOverlay";
 
 // Set up PDF.js worker
@@ -15,10 +15,12 @@ interface PDFViewerWrapperProps {
   // Highlighting uses line-level bounding boxes only
   boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains line_metadata)
   selectedLineIndexes?: number[]; // Line indexes to highlight (1-based)
+  citations?: Citation[]; // New: Robust citations
   activeHighlightId?: string | null; // ID of active highlight
   // Legacy API: for direct bounding box highlighting (backward compatibility)
   highlights?: BoundingBox[];
   activeHighlight?: BoundingBox | null;
+  isDebugMode?: boolean; // New prop
 }
 
 interface PageMetadata {
@@ -31,6 +33,7 @@ interface PageMetadata {
 
 export interface PDFViewerRef {
   scrollToHighlight: (lineIndexes: number[]) => void;
+  scrollToCitation: (citations: Citation[]) => void;
   scrollToPage: (pageNumber: number, lineIndex?: number) => void;
 }
 
@@ -41,9 +44,11 @@ function PDFViewerWrapper({
   pdfSource,
   boundingBoxes,
   selectedLineIndexes = [],
+  citations = [],
   activeHighlightId = null,
   highlights = [],
-  activeHighlight,
+  activeHighlight = null,
+  isDebugMode = false, // Default to false
 }, ref) {
   const [zoom, setZoom] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
@@ -286,6 +291,17 @@ function PDFViewerWrapper({
     setZoom(100);
   }, []);
 
+  // Calculate page offsets for highlight positioning
+  const getPageOffsets = useCallback(() => {
+    const offsets: number[] = [0];
+    let currentOffset = 0;
+    for (let i = 0; i < pageMetadata.length; i++) {
+      currentOffset += pageMetadata[i].height + 16; // 16px margin between pages
+      offsets.push(currentOffset);
+    }
+    return offsets;
+  }, [pageMetadata]);
+
   // Scroll to page function (optionally focus on a specific line)
   const scrollToPage = useCallback((pageNumber: number, lineIndex?: number) => {
     if (!containerRef.current || !pageMetadata.length || pageNumber < 1 || pageNumber > totalPages) {
@@ -339,23 +355,53 @@ function PDFViewerWrapper({
     scrollToPage(page, firstIndex);
   }, [boundingBoxes, pageMetadata, scrollToPage, getLineEntry]);
 
+  // Scroll to citation function
+  const scrollToCitation = useCallback((citations: Citation[]) => {
+    if (!citations.length || !containerRef.current || !pageMetadata.length) {
+      return;
+    }
+
+    const firstCitation = citations[0];
+    const page = firstCitation.page;
+    const pageIndex = page - 1;
+    const pageMeta = pageMetadata[pageIndex];
+    if (!pageMeta) return;
+
+    const offsets = getPageOffsets();
+    const pageOffset = offsets[pageIndex] || 0;
+
+    // Calculate Y position from bbox
+    // bbox: [x, y, width, pageHeight] (usually)
+    const rawBox = firstCitation.bbox;
+    let scrollY = pageOffset;
+
+    if (Array.isArray(rawBox) && rawBox.length >= 4) {
+        const baseY = Number(rawBox[1]);
+        const rawHeight = Number(rawBox[2]);
+        const pageHeightSource = Number(rawBox[3]);
+        
+        if (pageHeightSource && rawHeight > 0) {
+            const scaleFactor = pageMeta.height / pageHeightSource;
+            const yHtml = pageHeightSource - (baseY + rawHeight);
+            scrollY = pageOffset + yHtml * scaleFactor - 150; // Offset to show context
+        }
+    }
+
+    containerRef.current.scrollTo({
+      top: Math.max(0, scrollY),
+      behavior: "smooth",
+    });
+  }, [pageMetadata, getPageOffsets]);
+
   // Expose imperative API via ref
   useImperativeHandle(ref, () => ({
     scrollToHighlight,
+    scrollToCitation,
     scrollToPage,
-  }), [scrollToHighlight, scrollToPage]);
+  }), [scrollToHighlight, scrollToCitation, scrollToPage]);
 
 
-  // Calculate page offsets for highlight positioning
-  const getPageOffsets = useCallback(() => {
-    const offsets: number[] = [0];
-    let currentOffset = 0;
-    for (let i = 0; i < pageMetadata.length; i++) {
-      currentOffset += pageMetadata[i].height + 16; // 16px margin between pages
-      offsets.push(currentOffset);
-    }
-    return offsets;
-  }, [pageMetadata]);
+
 
   // Map highlights to their correct positions accounting for page offsets
   const getPositionedHighlights = useCallback(() => {
@@ -539,15 +585,13 @@ function PDFViewerWrapper({
                     <HighlightOverlay
                       boundingBoxes={boundingBoxes}
                       selectedLineIndexes={selectedLineIndexes}
-                      pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
-                        const canvas = canvasRefsRef.current.get(i + 1);
-                        return { current: canvas } as React.RefObject<HTMLCanvasElement>;
-                      })}
+                      citations={citations}
                       currentScale={zoom / 100}
                       pageMetadata={pageMetadata}
                       activeHighlightId={activeHighlightId}
                       scrollContainerRef={containerRef}
                       pagesLoaded={pagesLoaded}
+                      isDebugMode={isDebugMode}
                     />
                   ) : (
                     /* Legacy API: use positioned highlights */

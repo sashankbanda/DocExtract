@@ -1,6 +1,13 @@
+export interface Citation {
+  page: number;
+  bbox: number[]; // [x, y, width, height] or [page, x, y, width, height] depending on backend
+  line_index: number;
+}
+
 export interface StructuredFieldData {
   value: string | null;
-  line_indexes: number[]; // Line indexes for highlighting (1-based)
+  line_indexes?: number[]; // Deprecated, kept for backward compatibility if needed
+  citations: Citation[];
 }
 
 export interface UploadFile {

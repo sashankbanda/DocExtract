@@ -20,44 +20,35 @@ llmw_client = LLMWhispererClientV2(
 )
 
 
+# ---------------------------------------------------------
+# PROCESS FILE UPLOAD
+# ---------------------------------------------------------
+
 async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
-    """Upload a file to LLMWhisperer v2 and return text + line-level highlights."""
     if not LLMWHISPERER_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="LLMWHISPERER_API_KEY is not configured.",
-        )
+        raise HTTPException(500, "LLMWHISPERER_API_KEY is not configured.")
 
     file_bytes = await upload_file.read()
     await upload_file.seek(0)
 
     if not file_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"'{upload_file.filename}' is empty.",
-        )
+        raise HTTPException(400, f"{upload_file.filename} is empty")
 
-    # Save original file locally for reference and whisper call
-    input_path = get_input_path(upload_file.filename or "unknown", prefix="01")
-    if upload_file.filename:
-        original_ext = Path(upload_file.filename).suffix
-        if original_ext:
-            input_path = input_path.with_suffix(original_ext)
+    # Save input
+    input_path = get_input_path(upload_file.filename or "file", prefix="01")
+    ext = Path(upload_file.filename).suffix
+    if ext:
+        input_path = input_path.with_suffix(ext)
 
     try:
         save_bytes(input_path, file_bytes)
-        logger.info("Saved input file to %s", input_path)
-    except Exception as exc:
-        logger.warning(f"Failed to save input file: {exc}")
-        # Fallback to a temp file so the whisper call still succeeds
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=input_path.suffix or ".bin")
+    except Exception:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         tmp.write(file_bytes)
-        tmp.flush()
         tmp.close()
         input_path = Path(tmp.name)
-        logger.info("Using temporary file for whisper call: %s", input_path)
 
-    # Invoke whisper with synchronous wait and layout-preserving output
+    # ---- 1. Run whisper with layout output ----
     try:
         whisper_result = llmw_client.whisper(
             file_path=str(input_path),
@@ -65,31 +56,44 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
             wait_timeout=300,
             mode="form",
             output_mode="layout_preserving",
-            add_line_nos=False,
+            add_line_nos=True,
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLMWhisperer whisper failed: {exc}",
-        ) from exc
+        raise HTTPException(502, f"LLMWhisperer whisper failed: {exc}")
 
-    result_text = _extract_result_text(whisper_result)
+    original_text = _extract_result_text(whisper_result)
     whisper_hash = _extract_whisper_hash(whisper_result)
+    logger.info(f"Extracted whisper_hash: {whisper_hash}")
 
-    highlight_result = await get_highlight_data(whisper_hash)
-    bounding_boxes = _normalize_line_metadata(highlight_result)
+    # ---- 2. Fetch highlights (real bounding boxes) ----
+    highlight_data = await get_highlight_data(whisper_hash)
+    if highlight_data:
+        fkey = list(highlight_data.keys())[0]
+        logger.info(f"Highlight sample: {highlight_data[fkey]}")
+    else:
+        logger.warning("Highlight returned empty.")
+
+    # ---- 3. Normalize and reconstruct text ----
+    norm = _normalize_line_metadata(highlight_data)
+    reconstructed_text = norm["text"]
+    bounding_boxes = norm["bounding_boxes"]
+
+    final_text = reconstructed_text if reconstructed_text.strip() else original_text
 
     return {
-        "file_name": upload_file.filename or "unknown",
-        "result_text": result_text,
+        "file_name": upload_file.filename,
+        "result_text": final_text,
         "whisper_hash": whisper_hash,
         "bounding_boxes": bounding_boxes,
         "pages": _extract_nested(whisper_result, "pages"),
     }
 
 
+# ---------------------------------------------------------
+# RESULT PARSERS
+# ---------------------------------------------------------
+
 def _extract_result_text(data: Dict[str, Any]) -> str:
-    """Try multiple paths to extract result_text from the response."""
     if data.get("result_text"):
         return data["result_text"]
 
@@ -103,58 +107,46 @@ def _extract_result_text(data: Dict[str, Any]) -> str:
 
     if data.get("text"):
         return data["text"]
-    if extraction.get("text"):
-        return extraction["text"]
 
-    logger.warning(f"Could not find result_text in response. Keys: {list(data.keys())}")
+    logger.warning("Could not find result_text in response.")
     return ""
 
 
 def _extract_nested(data: Dict[str, Any], key: str) -> Any:
-    """Extract a key from nested response structure."""
-    if data.get(key):
+    if key in data:
         return data[key]
 
     extraction = data.get("extraction", {})
-    if isinstance(extraction, dict):
-        if extraction.get(key):
-            return extraction[key]
-        inner = extraction.get("extraction", {})
-        if isinstance(inner, dict) and inner.get(key):
-            return inner[key]
+    if key in extraction:
+        return extraction[key]
+
+    inner = extraction.get("extraction", {})
+    if key in inner:
+        return inner[key]
 
     return None
 
 
 def _extract_whisper_hash(payload: Dict[str, Any]) -> str:
-    candidates = [
-        payload.get("whisper_hash"),
-        payload.get("hash"),
-        payload.get("document_hash"),
-    ]
-    for candidate in candidates:
-        if candidate:
-            return str(candidate)
+    for k in ["whisper_hash", "hash", "document_hash"]:
+        if payload.get(k):
+            return str(payload[k])
 
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="LLMWhisperer response missing whisper hash.",
-    )
+    raise HTTPException(502, "LLMWhisperer response missing whisper_hash.")
 
+
+# ---------------------------------------------------------
+# LINE NORMALIZATION
+# ---------------------------------------------------------
 
 def _normalize_line_metadata(highlight_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Keep only valid line-level metadata with required raw_box."""
-    if not highlight_result or not isinstance(highlight_result, dict):
-        logger.warning("Highlight data missing; returning empty line_metadata.")
-        return {"line_metadata": []}
+    if not highlight_result:
+        return {"bounding_boxes": {"line_metadata": []}, "text": ""}
 
-    raw_lines = highlight_result.get("line_metadata") or []
-    if not isinstance(raw_lines, list):
-        logger.warning("Highlight data did not contain line_metadata list; returning empty.")
-        return {"line_metadata": []}
+    raw_lines = []
 
-    normalized: List[Dict[str, Any]] = []
-    for idx, entry in enumerate(raw_lines):
+    # highlight_result is dict keyed by line numbers: "1": {...}, "2": {...}
+    for key, entry in highlight_result.items():
         if not isinstance(entry, dict):
             continue
 
@@ -162,54 +154,76 @@ def _normalize_line_metadata(highlight_result: Optional[Dict[str, Any]]) -> Dict
         if not text:
             continue
 
-        raw_box = entry.get("raw_box") or entry.get("raw") or entry.get("bbox") or entry.get("box")
+        raw_box = entry.get("raw") or entry.get("raw_box") or entry.get("bbox")
+        if not raw_box:
+            continue
+
         if isinstance(raw_box, list) and len(raw_box) >= 4:
-            box_vals = raw_box[:4]
-        elif isinstance(raw_box, dict):
-            box_vals = [
-                raw_box.get("page") or raw_box.get("x") or raw_box.get("left") or 0,
-                raw_box.get("base_y") or raw_box.get("y") or raw_box.get("top") or 0,
-                raw_box.get("height") or raw_box.get("h") or 0,
-                raw_box.get("page_height") or raw_box.get("pageHeight") or 0,
-            ]
+            page, base_y, height, page_height = raw_box[:4]
         else:
             continue
 
-        try:
-            box_ints = [int(float(v)) for v in box_vals]
-        except (TypeError, ValueError):
+        # Ignore lines where the bbox is dummy / placeholder
+        if all(int(float(v)) == 0 for v in [page, base_y, height, page_height]):
             continue
 
-        if len(box_ints) < 4 or any(v is None for v in box_ints):
-            continue
-        if all(v == 0 for v in box_ints):
-            continue
+        raw_lines.append({
+            "text": text,
+            "page": int(float(page)),
+            "base_y": int(float(base_y)),
+            "height": int(float(height)),
+            "page_height": int(float(page_height)),
+        })
 
-        line_number = entry.get("line_number") or entry.get("line_no") or entry.get("line") or (idx + 1)
-        page = entry.get("page") or entry.get("page_number") or box_ints[0] or 1
-        page_height = entry.get("page_height") or entry.get("pageHeight") or box_ints[3]
+    if not raw_lines:
+        return {"bounding_boxes": {"line_metadata": []}, "text": ""}
 
-        normalized.append(
-            {
-                "line_number": int(line_number),
-                "text": text,
-                "raw_box": [int(box_ints[0]), int(box_ints[1]), int(box_ints[2]), int(box_ints[3])],
-                "page": int(page),
-                "page_height": int(page_height) if page_height is not None else None,
-            }
-        )
+    # Sort lines by page then vertical position
+    raw_lines.sort(key=lambda x: (x["page"], x["base_y"]))
 
-    return {"line_metadata": normalized}
+    normalized = []
+    collected_text = []
 
+    for idx, line in enumerate(raw_lines):
+        bbox = [
+            line["page"],
+            line["base_y"],
+            line["height"],
+            line["page_height"],
+        ]
+
+        normalized.append({
+            "line_index": idx,
+            "text": line["text"],
+            "bbox": bbox,
+            "page": line["page"],
+            "page_height": line["page_height"],
+        })
+
+        collected_text.append(line["text"])
+
+    return {
+        "bounding_boxes": {"line_metadata": normalized},
+        "text": "\n".join(collected_text),
+    }
+
+
+# ---------------------------------------------------------
+# FIXED HIGHLIGHT CALL (THE IMPORTANT PART)
+# ---------------------------------------------------------
 
 async def get_highlight_data(whisper_hash: str) -> Optional[Dict[str, Any]]:
-    """Fetch highlight bounding boxes using LLMWhisperer SDK V2 for a fixed line range."""
+    """Fetch highlight bounding boxes using LLMWhisperer V2."""
     try:
         logger.info("Requesting highlight data via SDK for lines 1-5000")
-        return llmw_client.get_highlight_data(
+
+        result = llmw_client.get_highlight_data(
             whisper_hash=whisper_hash,
-            lines="1-5000",
+            lines="1-5000"   # <-- ONLY THESE TWO ARGUMENTS
         )
+
+        return result
+
     except Exception as exc:
         logger.error(f"Highlight SDK error: {exc}")
         return None

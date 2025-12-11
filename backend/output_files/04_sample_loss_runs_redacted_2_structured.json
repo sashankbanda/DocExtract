@@ -1,0 +1,265 @@
+{
+    "file_id": "sample_loss_runs_redacted_2",
+    "extracted_fields": {
+        "lob": {
+            "value": "",
+            "citations": []
+        },
+        "insured": {
+            "value": "Gpt 40 mini",
+            "citations": []
+        },
+        "dba": {
+            "value": "",
+            "citations": []
+        },
+        "policyNumber": {
+            "value": "ABC123",
+            "citations": []
+        },
+        "effdate": {
+            "value": "10/31/3020",
+            "citations": []
+        },
+        "expdate": {
+            "value": "10/31/3021",
+            "citations": []
+        },
+        "carrier": {
+            "value": "",
+            "citations": []
+        },
+        "valuedDate": {
+            "value": "",
+            "citations": []
+        },
+        "claimNumber": {
+            "value": "",
+            "citations": []
+        },
+        "claimant": {
+            "value": "",
+            "citations": []
+        },
+        "claimStatus": {
+            "value": "",
+            "citations": []
+        },
+        "closedDate": {
+            "value": "",
+            "citations": []
+        },
+        "reportedDate": {
+            "value": "",
+            "citations": []
+        },
+        "dateOfLoss": {
+            "value": "",
+            "citations": []
+        },
+        "lossDescription": {
+            "value": "",
+            "citations": []
+        },
+        "lossLocation": {
+            "value": "",
+            "citations": []
+        },
+        "state": {
+            "value": "",
+            "citations": []
+        },
+        "city": {
+            "value": "",
+            "citations": []
+        },
+        "medicalPaid": {
+            "value": "",
+            "citations": []
+        },
+        "medicalPaid2": {
+            "value": "",
+            "citations": []
+        },
+        "medicalPaid3": {
+            "value": "",
+            "citations": []
+        },
+        "medicalReserves": {
+            "value": "",
+            "citations": []
+        },
+        "medicalReserves2": {
+            "value": "",
+            "citations": []
+        },
+        "medicalReserves3": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid2": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid3": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid4": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid5": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityPaid6": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves2": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves3": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves4": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves5": {
+            "value": "",
+            "citations": []
+        },
+        "indemnityReserves6": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid2": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid3": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid4": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid5": {
+            "value": "",
+            "citations": []
+        },
+        "expensesPaid6": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves2": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves3": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves4": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves5": {
+            "value": "",
+            "citations": []
+        },
+        "expensesReserves6": {
+            "value": "",
+            "citations": []
+        },
+        "totalPaid": {
+            "value": "$56.00",
+            "citations": []
+        },
+        "totalPaid2": {
+            "value": "",
+            "citations": []
+        },
+        "totalReserve": {
+            "value": "",
+            "citations": []
+        },
+        "totalReserve2": {
+            "value": "",
+            "citations": []
+        },
+        "totalIncurredSource": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries2": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries3": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries4": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries5": {
+            "value": "",
+            "citations": []
+        },
+        "recoveries6": {
+            "value": "",
+            "citations": []
+        },
+        "totalMedical": {
+            "value": "",
+            "citations": []
+        },
+        "totalIndemnity": {
+            "value": "",
+            "citations": []
+        },
+        "totalExpenses": {
+            "value": "",
+            "citations": []
+        },
+        "inferredCurrency": {
+            "value": "",
+            "citations": []
+        },
+        "pageNumber": {
+            "value": "",
+            "citations": []
+        },
+        "sheetName": {
+            "value": "",
+            "citations": []
+        }
+    }
+}

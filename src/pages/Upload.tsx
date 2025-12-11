@@ -7,7 +7,7 @@ import { useExtractionContext } from "@/context/ExtractionContext";
 import { extractFields, uploadSingleDocument } from "@/lib/api";
 import { UploadFile, UploadedDocumentResult } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, FileText, Loader2, Upload } from "lucide-react";
+import { ArrowRight, FileText, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -111,6 +111,7 @@ export default function UploadPage() {
             const structured = await extractFields({
               text: result.text,
               boundingBoxes: result.boundingBoxes || {},
+              fileName: result.fileName,
             });
 
             structuredFields = structured.fields;

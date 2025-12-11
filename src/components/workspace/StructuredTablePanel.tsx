@@ -1,12 +1,12 @@
-import { StructuredFieldData } from "@/types/document";
 import { cn } from "@/lib/utils";
+import { Citation, StructuredFieldData } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
 import { Table } from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface StructuredTablePanelProps {
   structuredFields?: Record<string, StructuredFieldData>;
-  onFieldClick?: (lineIndexes: number[]) => void;
+  onFieldClick?: (lineIndexes: number[], citations: Citation[]) => void;
   onFieldHover?: (lineIndexes: number[] | null) => void;
   isLoading?: boolean;
 }
@@ -31,9 +31,9 @@ export function StructuredTablePanel({
   isLoading = false,
 }: StructuredTablePanelProps) {
   const [isAnimating, setIsAnimating] = useState(false);
-  const handleRowClick = (lineIndexes: number[]) => {
-    if (onFieldClick && lineIndexes.length > 0) {
-      onFieldClick(lineIndexes);
+  const handleRowClick = (lineIndexes: number[], citations: Citation[]) => {
+    if (onFieldClick && (lineIndexes.length > 0 || citations.length > 0)) {
+      onFieldClick(lineIndexes, citations);
     }
   };
 
@@ -59,6 +59,7 @@ export function StructuredTablePanel({
           key,
           value: data.value || "",
           line_indexes: data.line_indexes || [],
+          citations: data.citations || [],
         }))
         .filter((field) => field.value !== null && field.value !== "")
     : [];
@@ -151,7 +152,7 @@ export function StructuredTablePanel({
                   )}
                   onMouseEnter={() => handleRowHover(field.line_indexes)}
                   onMouseLeave={() => handleRowHover(null)}
-                  onClick={() => handleRowClick(field.line_indexes)}
+                  onClick={() => handleRowClick(field.line_indexes, field.citations)}
                 >
                   <td className="px-4 py-3 font-medium text-foreground">
                     {field.key}

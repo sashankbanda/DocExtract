@@ -51,6 +51,7 @@ export async function uploadDocuments(files: File[]): Promise<UploadedDocumentRe
     whisperHash: item.whisperHash ?? "",
     boundingBoxes: item.boundingBoxes ?? null,
     pages: item.pages ?? null,
+    rawFile: files[index] ?? null,
   }));
 }
 
@@ -80,13 +81,13 @@ export async function uploadSingleDocument(
           if (onProgress) onProgress(90);
 
           const payload = await parseJsonResponse(new Response(xhr.responseText));
-          
+
           if (!Array.isArray(payload) || payload.length === 0) {
             throw new Error("Unexpected upload response format.");
           }
 
           const item = payload[0];
-          
+
           // Complete: 100%
           if (onProgress) onProgress(100);
 
@@ -97,6 +98,7 @@ export async function uploadSingleDocument(
             whisperHash: item.whisperHash ?? "",
             boundingBoxes: item.boundingBoxes ?? null,
             pages: item.pages ?? null,
+            rawFile: file,
           });
         } catch (error) {
           reject(error instanceof Error ? error : new Error("Failed to parse response"));
@@ -128,6 +130,7 @@ export async function uploadSingleDocument(
 export interface ExtractFieldsPayload {
   text: string;
   boundingBoxes?: Record<string, unknown> | unknown[] | null;
+  fileName?: string;
 }
 
 export interface ExtractFieldsResponse {
@@ -147,11 +150,12 @@ export async function extractFields(
     body: JSON.stringify({
       text: payload.text,
       boundingBoxes: payload.boundingBoxes ?? {},
+      fileName: payload.fileName,
     }),
   });
 
   const data = await handleResponse(response);
-  
+
   if (!data || typeof data !== "object" || !data.fields) {
     throw new Error("Unexpected extract fields response format.");
   }

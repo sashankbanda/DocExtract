@@ -20,13 +20,21 @@ class ExtractFieldsRequest(BaseModel):
         default=None,
         description="Bounding box metadata from LLMWhisperer (dict or list)",
     )
+    fileName: Optional[str] = Field(default=None, description="Original filename for output naming")
+
+
+class Citation(BaseModel):
+    """Model for a single citation."""
+    page: int
+    bbox: List[int]
+    line_index: int
 
 
 class FieldData(BaseModel):
     """Model for individual field data."""
 
     value: str
-    line_indexes: list[int] = Field(default_factory=list)  # Line indexes for highlighting
+    citations: List[Citation] = Field(default_factory=list)
 
 
 class ExtractFieldsResponse(BaseModel):
@@ -45,17 +53,8 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
     This endpoint:
     1. Loads the specified template JSON
     2. Uses Groq LLM to extract field values from the text
-    3. Maps field values to line_indexes using exact string matching over line metadata
-    4. Returns structured field data with line_indexes only (no offsets)
-
-    Args:
-        request: ExtractFieldsRequest with text, boundingBoxes, and optional templateName
-
-    Returns:
-        ExtractFieldsResponse with extracted fields
-
-    Raises:
-        HTTPException: If text is empty, template not found, or extraction fails
+    3. Maps field values to citations (page, bbox, line_index) using robust matching
+    4. Returns structured field data with full citations
     """
     # Validate input
     if not request.text or not request.text.strip():
@@ -79,9 +78,18 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         # Convert to response format
         fields_dict: Dict[str, FieldData] = {}
         for field_key, field_data in result.get("fields", {}).items():
+            raw_citations = field_data.get("citations", [])
+            citations = [
+                Citation(
+                    page=c.get("page", 1),
+                    bbox=c.get("bbox", [0, 0, 0, 0]),
+                    line_index=c.get("line_index", 0)
+                ) for c in raw_citations
+            ]
+            
             fields_dict[field_key] = FieldData(
                 value=field_data.get("value", ""),
-                line_indexes=field_data.get("line_indexes", []),
+                citations=citations,
             )
 
         logger.info(f"Successfully extracted {len(fields_dict)} fields")
@@ -90,24 +98,46 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
         try:
             import hashlib
             # Try to extract whisperHash from boundingBoxes if available
+            # Determine filename for output
             filename = None
-            if isinstance(normalized_boxes, dict):
+            if request.fileName:
+                filename = request.fileName
+                # Remove extension if present
+                if "." in filename:
+                    filename = filename.rsplit(".", 1)[0]
+            
+            if not filename and isinstance(normalized_boxes, dict):
                 whisper_hash = normalized_boxes.get("whisperHash") or normalized_boxes.get("whisper_hash")
                 if whisper_hash:
                     filename = f"file_{str(whisper_hash)[:12]}"
             
-            # Fallback to text hash if no whisperHash found
+            # Fallback to text hash if no filename found
             if not filename:
                 text_hash = hashlib.md5(request.text.encode()).hexdigest()[:12]
                 filename = f"extracted_{text_hash}"
             
-            structured_path = get_output_path(filename, suffix="_structured", prefix="04")
-            # Save with line_numbers included for each field
-            save_json(structured_path, {
-                "text": request.text,
-                "fields": {k: v.dict() for k, v in fields_dict.items()},
-                "bounding_boxes": normalized_boxes or {},
-            })
+            structured_path = get_output_path(filename, suffix="_structured", extension=".json", prefix="04")
+            
+            # Construct strict JSON structure for _structured.json
+            structured_data = {
+                "file_id": filename,
+                "extracted_fields": {}
+            }
+            
+            for field_key, field_obj in fields_dict.items():
+                structured_data["extracted_fields"][field_key] = {
+                    "value": field_obj.value,
+                    "citations": [
+                        {
+                            "page": c.page,
+                            "line_index": c.line_index,
+                            "bbox": c.bbox
+                        }
+                        for c in field_obj.citations
+                    ]
+                }
+
+            save_json(structured_path, structured_data)
             logger.info("Saved structured fields to %s", structured_path)
         except Exception as e:
             logger.warning(f"Failed to save structured fields: {e}")

@@ -113,6 +113,7 @@ def get_output_path(filename: str, suffix: str, prefix: str, extension: str = "j
         Path object for the output file
     """
     safe_name = sanitize_filename(filename)
+    extension = extension.lstrip(".")
     return OUTPUT_DIR / f"{prefix}_{safe_name}{suffix}.{extension}"
 
 

@@ -66,6 +66,49 @@ async def upload_files(files: List[UploadFile] = File(...)) -> List[UploadRespon
             # - Extracting result_text, whisper_hash, pages, and bounding_boxes
             extraction_result = await process_upload_file(uploaded_file)
             
+            # Save _text.txt and _bboxes.json
+            from utils.file_saver import get_output_path, save_text, save_json
+            
+            base_filename = file_name
+            # Remove extension for base name if possible
+            if "." in base_filename:
+                base_filename = base_filename.rsplit(".", 1)[0]
+                
+            # 1. Save _text.txt
+            text_path = get_output_path(base_filename, suffix="_text", extension=".txt", prefix="02")
+            save_text(text_path, extraction_result["result_text"])
+            
+            # 2. Save _bboxes.json
+            bboxes_path = get_output_path(base_filename, suffix="_bboxes", extension=".json", prefix="03")
+            
+            # Construct strict JSON structure
+            line_metadata = extraction_result["bounding_boxes"].get("line_metadata", [])
+            
+            # Calculate total pages
+            max_page = 0
+            for line in line_metadata:
+                p = line.get("page", 1)
+                if p > max_page:
+                    max_page = p
+            
+            bboxes_data = {
+                "text": extraction_result["result_text"],
+                "pages": max_page,
+                "lines": [
+                    {
+                        "line_index": line["line_index"],
+                        "page": line["page"],
+                        "bbox": line["bbox"],
+                        "text": line["text"]
+                    }
+                    for line in line_metadata
+                ]
+            }
+            logger.info(f"Saving bboxes to {bboxes_path}. Data keys: {list(bboxes_data.keys())}. Lines count: {len(bboxes_data['lines'])}")
+            save_json(bboxes_path, bboxes_data)
+            
+            logger.info(f"Saved outputs: {text_path}, {bboxes_path}")
+
             # Format response using utility function
             formatted = format_upload_response(extraction_result)
             responses.append(UploadResponse(**formatted))

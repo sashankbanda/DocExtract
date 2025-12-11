@@ -1,12 +1,12 @@
-import { StructuredFieldData } from "@/types/document";
 import { cn } from "@/lib/utils";
+import { Citation, StructuredFieldData } from "@/types/document";
 import { AnimatePresence, motion } from "framer-motion";
 import { Tag } from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface TemplateFieldsPanelProps {
   structuredFields?: Record<string, StructuredFieldData>;
-  onFieldClick?: (lineIndexes: number[]) => void;
+  onFieldClick?: (lineIndexes: number[], citations: Citation[]) => void;
   onFieldHover?: (lineIndexes: number[] | null) => void;
   isLoading?: boolean;
 }
@@ -32,9 +32,9 @@ export function TemplateFieldsPanel({
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const handleFieldClick = (key: string, lineIndexes: number[]) => {
-    if (onFieldClick && lineIndexes.length > 0) {
-      onFieldClick(lineIndexes);
+  const handleFieldClick = (key: string, lineIndexes: number[], citations: Citation[]) => {
+    if (onFieldClick && (lineIndexes.length > 0 || citations.length > 0)) {
+      onFieldClick(lineIndexes, citations);
     }
   };
 
@@ -61,6 +61,7 @@ export function TemplateFieldsPanel({
           key,
           value: data.value || "",
           line_indexes: data.line_indexes || [],
+          citations: data.citations || [],
         }))
         .filter((field) => field.value !== null && field.value !== "")
     : [];
@@ -125,7 +126,7 @@ export function TemplateFieldsPanel({
               )}
               onMouseEnter={() => handleFieldHover(field.key, field.line_indexes)}
               onMouseLeave={() => handleFieldHover(null, null)}
-              onClick={() => handleFieldClick(field.key, field.line_indexes)}
+              onClick={() => handleFieldClick(field.key, field.line_indexes, field.citations)}
             >
               {/* Subtle hover animation glow */}
               {hasLineIndexes && (
