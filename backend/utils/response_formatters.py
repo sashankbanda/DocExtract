@@ -102,19 +102,26 @@ def _format_bounding_boxes_for_save(
             
             if isinstance(line_data, dict):
                 line_number = line_data.get("line_no") or line_data.get("line_number") or line_data.get("line") or (idx + 1)
-                # Extract bounding box - format may vary
-                bbox = line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box") or line_data.get("raw_box")
-                if bbox:
-                    if isinstance(bbox, list) and len(bbox) >= 4:
-                        # Assume format: [page, base_y, height, page_height]
-                        raw_box = bbox[:4]
-                    elif isinstance(bbox, dict):
-                        # Convert dict to list format
-                        page = bbox.get("page", 1)
-                        base_y = bbox.get("y") or bbox.get("base_y") or bbox.get("top", 0)
-                        height = bbox.get("height", 0)
-                        page_height = bbox.get("page_height") or bbox.get("pageHeight", 0)
-                        raw_box = [page, base_y, height, page_height]
+                # Extract bounding box - API returns "raw" field, normalize to "raw_box"
+                # Use: raw_box = line.get("raw") or line.get("raw_box")
+                raw_box = line_data.get("raw") or line_data.get("raw_box")
+                if not raw_box:
+                    # Fallback to other bbox fields
+                    bbox = line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box")
+                    if bbox:
+                        if isinstance(bbox, list) and len(bbox) >= 4:
+                            # Assume format: [page, base_y, height, page_height]
+                            raw_box = bbox[:4]
+                        elif isinstance(bbox, dict):
+                            # Convert dict to list format
+                            page = bbox.get("page", 1)
+                            base_y = bbox.get("y") or bbox.get("base_y") or bbox.get("top", 0)
+                            height = bbox.get("height", 0)
+                            page_height = bbox.get("page_height") or bbox.get("pageHeight", 0)
+                            raw_box = [page, base_y, height, page_height]
+                elif isinstance(raw_box, list) and len(raw_box) >= 4:
+                    # Ensure it's in correct format: [page, y, height, page_height]
+                    raw_box = raw_box[:4]
             else:
                 line_number = idx + 1
                 raw_box = None

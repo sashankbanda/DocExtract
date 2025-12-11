@@ -7,8 +7,8 @@
         "insured": {
             "value": "ABCAING HOMEC",
             "word_indexes": [
-                25,
-                26
+                17,
+                18
             ]
         },
         "dba": {
@@ -18,19 +18,19 @@
         "policyNumber": {
             "value": "P1234",
             "word_indexes": [
-                15
+                9
             ]
         },
         "effdate": {
             "value": "6/1/2024",
             "word_indexes": [
-                18
+                12
             ]
         },
         "expdate": {
             "value": "6/1/2025",
             "word_indexes": [
-                20
+                14
             ]
         },
         "carrier": {
@@ -40,48 +40,50 @@
         "valuedDate": {
             "value": "12/30/3023",
             "word_indexes": [
-                277
+                231
             ]
         },
         "claimNumber": {
             "value": "123",
             "word_indexes": [
-                58
+                42
             ]
         },
         "claimant": {
             "value": "SYDIA",
             "word_indexes": [
-                117
+                95
             ]
         },
         "claimStatus": {
             "value": "O",
             "word_indexes": [
-                118
+                96
             ]
         },
         "closedDate": {
-            "value": "8/6/18",
-            "word_indexes": [
-                110
-            ]
+            "value": "",
+            "word_indexes": []
         },
         "reportedDate": {
             "value": "8/6/18",
             "word_indexes": [
-                110
+                88
             ]
         },
         "dateOfLoss": {
             "value": "8/6/18",
             "word_indexes": [
-                110
+                88
             ]
         },
         "lossDescription": {
-            "value": "Some loss description about this loss.",
-            "word_indexes": []
+            "value": "Some loss description",
+            "word_indexes": [
+                82,
+                83,
+                84
+            ]
         },
         "lossLocation": {
             "value": "",
@@ -90,7 +92,7 @@
         "state": {
             "value": "Yt",
             "word_indexes": [
-                113
+                91
             ]
         },
         "city": {
@@ -100,7 +102,7 @@
         "medicalPaid": {
             "value": "$0",
             "word_indexes": [
-                119
+                97
             ]
         },
         "medicalPaid2": {
@@ -114,7 +116,7 @@
         "medicalReserves": {
             "value": "$5,010",
             "word_indexes": [
-                120
+                98
             ]
         },
         "medicalReserves2": {
@@ -128,7 +130,7 @@
         "indemnityPaid": {
             "value": "$0",
             "word_indexes": [
-                119
+                97
             ]
         },
         "indemnityPaid2": {
@@ -154,7 +156,7 @@
         "indemnityReserves": {
             "value": "$10,000",
             "word_indexes": [
-                121
+                99
             ]
         },
         "indemnityReserves2": {
@@ -236,7 +238,7 @@
         "totalReserve": {
             "value": "$15,010",
             "word_indexes": [
-                122
+                100
             ]
         },
         "totalReserve2": {
@@ -290,7 +292,7 @@
         "pageNumber": {
             "value": "1",
             "word_indexes": [
-                4
+                1
             ]
         },
         "sheetName": {

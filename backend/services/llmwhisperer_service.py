@@ -96,36 +96,37 @@ async def process_upload_file(upload_file: UploadFile) -> Dict[str, Any]:
     # Try multiple paths to find result_text (API structure varies)
     result_text = _extract_result_text(extraction)
     
-    # Parse hex line numbers from layout_preserving text (e.g., "0x01:", "0x0A:")
-    # These are used to request exact line ranges from get_highlight_data
-    line_numbers = _parse_hex_line_numbers(result_text)
+    # Get highlight data with fixed catch-all range
+    highlight_response = await get_highlight_data(whisper_hash=whisper_hash)
     
-    # Get highlight data with exact line ranges (not "1-5000")
-    highlight_response = await get_highlight_data(
-        whisper_hash=whisper_hash,
-        line_numbers=line_numbers,
-    )
-    
-    # Extract bounding boxes from highlight_response
-    # highlight_response is the full JSON dict from the API which contains line_metadata
-    bounding_boxes = highlight_response.get("line_metadata")
-    
-    # If we have line_metadata from highlight API, use the full highlight_response dict
-    # (which has the correct structure for _generate_word_level_boxes)
-    if bounding_boxes:
-        bounding_boxes = highlight_response
-        logger.info("Using line_metadata from highlight API")
-    else:
-        # Fallback: extract from extraction result and wrap in dict structure
+    # Standardize bounding_boxes structure
+    # Only use fallback if highlight API returns empty dict or no line_metadata
+    if not highlight_response or not isinstance(highlight_response, dict):
+        # Empty response - use fallback
+        logger.warning("Highlight API returned empty response, using fallback generation from extraction result")
+        line_metadata = _extract_nested(extraction, "line_metadata")
+        if line_metadata:
+            bounding_boxes = {"line_metadata": line_metadata}
+        else:
+            bounding_boxes = None
+    elif not highlight_response.get("line_metadata"):
+        # No line_metadata in response - use fallback
         logger.warning("Highlight API returned no line_metadata, using fallback generation from extraction result")
         line_metadata = _extract_nested(extraction, "line_metadata")
         if line_metadata:
             bounding_boxes = {"line_metadata": line_metadata}
         else:
             bounding_boxes = None
+    else:
+        # Valid response with line_metadata - use it directly
+        bounding_boxes = highlight_response
+        # Ensure it's a dict with line_metadata key
+        if isinstance(bounding_boxes, list):
+            bounding_boxes = {"line_metadata": bounding_boxes}
+        logger.info(f"Using {len(bounding_boxes.get('line_metadata', []))} lines from highlight API")
     
     # Generate word-level boxes from line-level boxes
-    # LLMWhisperer returns line-level boxes, we need word-level for precise highlighting
+    # Only generate if we have valid bounding_boxes and text
     if bounding_boxes and result_text:
         n_lines_before = len(bounding_boxes.get("line_metadata", [])) if isinstance(bounding_boxes, dict) else 0
         bounding_boxes = _generate_word_level_boxes(bounding_boxes, result_text)
@@ -272,34 +273,6 @@ async def _retrieve_result(
     return result
 
 
-def _parse_hex_line_numbers(text: str) -> List[int]:
-    """
-    Parse hex line numbers from layout_preserving text.
-    
-    LLMWhisperer adds line numbers in hex format like "0x01:", "0x0A:", etc.
-    We extract these to request exact line ranges from get_highlight_data.
-    
-    Args:
-        text: Layout-preserving text with hex line numbers
-        
-    Returns:
-        List of line numbers (as integers, 1-based)
-    """
-    import re
-    line_numbers = set()
-    
-    # Pattern to match hex line numbers: "0x01:", "0x0A:", etc.
-    pattern = r'0x([0-9A-Fa-f]+):'
-    matches = re.findall(pattern, text)
-    
-    for match in matches:
-        try:
-            line_num = int(match, 16)  # Convert hex to int
-            line_numbers.add(line_num)
-        except ValueError:
-            continue
-    
-    return sorted(list(line_numbers))
 
 
 def _generate_word_level_boxes(
@@ -349,8 +322,9 @@ def _generate_word_level_boxes(
             updated_line_metadata.append(line_data)
             continue
         
-        # Extract bounding box - prefer raw_box, fallback to bbox/bounding_box/box
-        raw_box = line_data.get("raw_box")
+        # Extract bounding box - API returns "raw" field, normalize to "raw_box"
+        # Use: raw_box = line["raw"] or line["raw_box"]
+        raw_box = line_data.get("raw") or line_data.get("raw_box")
         bbox = raw_box or line_data.get("bbox") or line_data.get("bounding_box") or line_data.get("box")
         
         # Parse bounding box format
@@ -403,15 +377,28 @@ def _generate_word_level_boxes(
             
             page = int(line_data.get("page", line_data.get("page_number", 1)))
         
-        # If still no valid dimensions, skip this line
+        # If still no valid dimensions, try to use raw_box directly
         if line_width <= 0 or line_height <= 0:
-            # Create a minimal raw_box for the line even if we can't generate words
-            if not raw_box:
-                updated_line = {**line_data, "raw_box": [page, line_y, line_height, page_height] if page_height > 0 else None}
+            if raw_box and isinstance(raw_box, list) and len(raw_box) >= 4:
+                # Use raw_box directly: [page, y, height, page_height]
+                page = int(raw_box[0]) if raw_box[0] else 1
+                line_y = float(raw_box[1]) if raw_box[1] else 0
+                line_height = float(raw_box[2]) if raw_box[2] else 0
+                page_height = float(raw_box[3]) if raw_box[3] else 0
+                # Estimate width from page height
+                if page_height > 0:
+                    page_width = page_height * 0.707  # A4 aspect ratio
+                    line_width = page_width
+                else:
+                    line_width = line_height * 50  # Rough estimate
             else:
-                updated_line = line_data
-            updated_line_metadata.append(updated_line)
-            continue
+                # No valid dimensions and no raw_box - skip this line
+                if not raw_box:
+                    updated_line = {**line_data, "raw_box": None}
+                else:
+                    updated_line = {**line_data, "raw_box": raw_box}
+                updated_line_metadata.append(updated_line)
+                continue
         
         # Split line into words (preserve punctuation attached to tokens)
         line_words = line_text.split()
@@ -456,10 +443,24 @@ def _generate_word_level_boxes(
             global_word_index += 1
         
         # Ensure raw_box is populated for the line
+        # Normalize: ensure every line has raw_box with [page, y, height, page_height]
         if not raw_box:
+            # Generate from computed values
             raw_box = [page, line_y, line_height, page_height] if page_height > 0 else [page, line_y, line_height, 0]
+            logger.debug(f"Generated raw_box for line {line_data.get('line_number', 'unknown')}: {raw_box}")
+        elif isinstance(raw_box, list) and len(raw_box) >= 4:
+            # Ensure page and page_height are set in line_data
+            if "page" not in line_data:
+                line_data["page"] = int(raw_box[0]) if raw_box[0] else 1
+            if "page_height" not in line_data:
+                line_data["page_height"] = float(raw_box[3]) if len(raw_box) > 3 and raw_box[3] else 0
         
         updated_line = {**line_data, "raw_box": raw_box}
+        # Ensure page and page_height are in the updated line
+        if "page" not in updated_line:
+            updated_line["page"] = page
+        if "page_height" not in updated_line and page_height > 0:
+            updated_line["page_height"] = page_height
         updated_line_metadata.append(updated_line)
     
     # Log generation results
@@ -481,20 +482,18 @@ def _generate_word_level_boxes(
 
 async def get_highlight_data(
     whisper_hash: str,
-    line_numbers: List[int],
 ) -> Dict[str, Any]:
     """
     Fetch highlight/bounding box data for a processed document.
     
-    Uses exact line number ranges parsed from layout_preserving text,
-    not a generic "1-5000" range.
+    Uses fixed catch-all range "0x01-0xFFFF" to ensure API returns
+    bounding boxes for every line.
     
     Args:
         whisper_hash: Whisper hash for the document
-        line_numbers: List of line numbers to request (1-based, from hex parsing)
         
     Returns:
-        Highlight data with bounding boxes
+        Highlight data with bounding boxes, or empty dict if API fails
     """
     import httpx
     
@@ -506,43 +505,14 @@ async def get_highlight_data(
         "unstract-key": LLMWHISPERER_API_KEY,
     }
     
-    if not line_numbers:
-        logger.warning("No line numbers provided, requesting all lines")
-        line_numbers = [1]  # Fallback
+    # Use fixed catch-all range to get all lines
+    line_range = "0x01-0xFFFF"
+    logger.info(f"Using full highlight range: {line_range}")
     
     try:
-        # Build line range string from parsed line numbers
-        # Format: "1,2,3" or "1-10" if consecutive
-        if len(line_numbers) == 1:
-            line_range = str(line_numbers[0])
-        else:
-            # Group consecutive numbers
-            ranges = []
-            start = line_numbers[0]
-            end = line_numbers[0]
-            
-            for i in range(1, len(line_numbers)):
-                if line_numbers[i] == end + 1:
-                    end = line_numbers[i]
-                else:
-                    if start == end:
-                        ranges.append(str(start))
-                    else:
-                        ranges.append(f"{start}-{end}")
-                    start = line_numbers[i]
-                    end = line_numbers[i]
-            
-            # Add last range
-            if start == end:
-                ranges.append(str(start))
-            else:
-                ranges.append(f"{start}-{end}")
-            
-            line_range = ",".join(ranges)
-        
         # Create own client to avoid closed client issues
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Try dedicated highlight endpoint with exact line ranges
+            # Call highlight endpoint with fixed range
             highlight_response = await client.get(
                 f"{LLMWHISPERER_BASE_URL.rstrip('/')}/whisper-highlight",
                 params={
@@ -553,21 +523,36 @@ async def get_highlight_data(
             )
             highlight_response.raise_for_status()
             data = highlight_response.json()
-            # Ensure raw_box is never null
+            
+            # Normalize raw_box from "raw" field
             if isinstance(data, dict) and "line_metadata" in data:
+                line_count = 0
                 for line in data.get("line_metadata", []):
-                    if isinstance(line, dict) and not line.get("raw_box") and line.get("bbox"):
-                        line["raw_box"] = line["bbox"]
-            return data
+                    if isinstance(line, dict):
+                        line_count += 1
+                        # API returns "raw" field, normalize to "raw_box"
+                        raw_box = line.get("raw") or line.get("raw_box")
+                        if raw_box:
+                            line["raw_box"] = raw_box
+                            # Ensure page and page_height are set
+                            if "page" not in line and isinstance(raw_box, list) and len(raw_box) > 0:
+                                line["page"] = int(raw_box[0]) if raw_box[0] else 1
+                            if "page_height" not in line and isinstance(raw_box, list) and len(raw_box) > 3:
+                                line["page_height"] = float(raw_box[3]) if raw_box[3] else 0
+                
+                logger.info(f"Highlight API returned {line_count} lines")
+                return data
+            
+            # If no line_metadata, return empty dict
+            logger.warning("Highlight API returned no line_metadata")
+            return {}
+            
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            # Endpoint doesn't exist, will use extraction result instead
-            logger.debug("Highlight endpoint not available, using extraction result")
+            logger.warning("Highlight endpoint not available (404)")
         else:
-            logger.warning(f"Highlight endpoint returned error: {exc.response.text}")
-    except httpx.HTTPError:
-        # Network error, will use extraction result instead
-        logger.debug("Failed to reach highlight endpoint, using extraction result")
-    
-    # Fallback: return empty dict, caller should use extraction result
-    return {}
+            logger.warning(f"Highlight endpoint returned error: {exc.response.status_code} - {exc.response.text}")
+        return {}
+    except httpx.HTTPError as exc:
+        logger.warning(f"Failed to reach highlight endpoint: {exc}")
+        return {}
