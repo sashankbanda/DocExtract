@@ -32,7 +32,6 @@ export default function Workspace() {
   const [hoveredBoundingBox, setHoveredBoundingBox] = useState<BoundingBox | null>(null);
   const [activeBoundingBox, setActiveBoundingBox] = useState<BoundingBox | null>(null);
   const [selectedWordIndexes, setSelectedWordIndexes] = useState<number[]>([]);
-  const [activeLineNumbers, setActiveLineNumbers] = useState<number[]>([]); // Line numbers for highlighting
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const [isSwitchingFile, setIsSwitchingFile] = useState(false);
   const pdfViewerRef = useRef<PDFViewerRef>(null);
@@ -55,7 +54,6 @@ export default function Workspace() {
         setSelectedFile(doc);
         // Reset highlights
         setSelectedWordIndexes([]);
-        setActiveLineNumbers([]);
         setActiveHighlightId(null);
         setHoveredBoundingBox(null);
         setActiveBoundingBox(null);
@@ -73,53 +71,24 @@ export default function Workspace() {
   }, [documents, selectedFileId, selectedFile]);
 
 
-  // Handle line number highlighting (new API)
-  // NOTE: We now use line_numbers instead of word_indexes for highlighting
-  // LLMWhisperer returns line-level bounding boxes, not word-level
-  // The backend maps word_indexes to line_numbers for us
-  const handleLineNumberHover = useCallback((lineNumbers: number[] | null) => {
-    setActiveLineNumbers(lineNumbers || []);
-  }, []);
-
-  const handleLineNumberClick = useCallback((lineNumbers: number[]) => {
-    setActiveLineNumbers(lineNumbers);
-    setActiveHighlightId(`highlight-${Date.now()}`);
-    
-    // Scroll to first line
-    if (pdfViewerRef.current && lineNumbers.length > 0) {
-      pdfViewerRef.current.scrollToPage(1); // TODO: Map line number to page
-    }
-    
-    setTimeout(() => setActiveHighlightId(null), 2000);
-  }, []);
-
-  // Legacy handlers for backward compatibility (convert word_indexes to line_numbers)
+  // Handle word index highlighting
+  // NOTE: We use word_indexes for highlighting. The backend generates word-level boxes
+  // from line-level boxes returned by LLMWhisperer.
   const handleWordIndexHover = useCallback((wordIndexes: number[] | null) => {
-    // For now, just store word indexes (will be converted to line numbers by backend)
     setSelectedWordIndexes(wordIndexes || []);
   }, []);
 
   const handleWordIndexClick = useCallback((wordIndexes: number[]) => {
-    // Extract line_numbers from structured fields if available
-    if (selectedDocument?.structuredFields) {
-      const allLineNumbers = new Set<number>();
-      for (const field of Object.values(selectedDocument.structuredFields)) {
-        // Find fields that contain these word indexes
-        const hasWordIndex = wordIndexes.some(wi => field.word_indexes?.includes(wi));
-        if (hasWordIndex && field.line_numbers) {
-          field.line_numbers.forEach(ln => allLineNumbers.add(ln));
-        }
-      }
-      if (allLineNumbers.size > 0) {
-        handleLineNumberClick(Array.from(allLineNumbers));
-        return;
-      }
-    }
-    // Fallback: use word indexes directly (will be handled by HighlightOverlay)
     setSelectedWordIndexes(wordIndexes);
     setActiveHighlightId(`highlight-${Date.now()}`);
+    
+    // Scroll to highlight
+    if (pdfViewerRef.current && wordIndexes.length > 0) {
+      pdfViewerRef.current.scrollToHighlight(wordIndexes);
+    }
+    
     setTimeout(() => setActiveHighlightId(null), 2000);
-  }, [selectedDocument, handleLineNumberClick]);
+  }, []);
 
   // Legacy bounding box handlers (for backward compatibility)
   const handleItemHover = useCallback((boundingBox: BoundingBox | null) => {
@@ -248,7 +217,6 @@ export default function Workspace() {
             pdfSource={selectedDocument?.rawFile || null}
             boundingBoxes={selectedDocument?.boundingBoxes}
             selectedIndexes={selectedWordIndexes}
-            activeLineNumbers={activeLineNumbers}
             activeHighlightId={activeHighlightId}
             highlights={allHighlights}
             activeHighlight={activeBoundingBox}

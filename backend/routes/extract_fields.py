@@ -30,8 +30,7 @@ class FieldData(BaseModel):
     """Model for individual field data."""
 
     value: str
-    word_indexes: list[int] = Field(default_factory=list)
-    line_numbers: list[int] = Field(default_factory=list)  # Line numbers for highlighting
+    word_indexes: list[int] = Field(default_factory=list)  # Word indexes for highlighting
 
 
 class ExtractFieldsResponse(BaseModel):
@@ -92,7 +91,6 @@ async def extract_fields(request: ExtractFieldsRequest) -> ExtractFieldsResponse
             fields_dict[field_key] = FieldData(
                 value=field_data.get("value", ""),
                 word_indexes=field_data.get("word_indexes", []),
-                line_numbers=field_data.get("line_numbers", []),
             )
 
         logger.info(f"Successfully extracted {len(fields_dict)} fields")

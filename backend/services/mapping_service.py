@@ -126,26 +126,30 @@ async def extract_fields_from_text(
     if not llm_response:
         return {"fields": _create_empty_fields(template)}
 
-    # Parse LLM JSON response - only expects value and word_indexes
+    # Parse LLM JSON response - only expects value (no word_indexes from Groq)
     parsed_response = _parse_llm_response(llm_response, template)
 
-    # Map word_indexes to line_numbers using line_metadata
-    # LLMWhisperer returns line-level bounding boxes, not word-level
-    # We map word indexes to line numbers for line-level highlighting
-    line_metadata = _extract_line_metadata(bounding_boxes)
+    # Map field values to word indexes using exact string matching
+    # Groq only extracts values, we determine word_indexes backend-side
+    tokenized_text = text.split()  # Split on whitespace for word indexing
     
     result_fields = {}
     for field_key, field_data in parsed_response.items():
         value = field_data.get("value")
-        word_indexes = field_data.get("word_indexes", [])
+        if not value or value is None:
+            result_fields[field_key] = {
+                "value": "",
+                "word_indexes": [],
+            }
+            continue
         
-        # Map word_indexes to line_numbers
-        line_numbers = map_word_indexes_to_line_numbers(word_indexes, line_metadata, text)
+        # Find word indexes by exact string matching
+        # Search for the value in the tokenized text
+        word_indexes = _find_word_indexes_for_value(value, tokenized_text)
         
         result_fields[field_key] = {
-            "value": value if value is not None else "",
+            "value": str(value),
             "word_indexes": word_indexes,
-            "line_numbers": line_numbers,
         }
 
     return {"fields": result_fields}
@@ -155,10 +159,9 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
     """
     Build prompt for LLM extraction.
     
-    NOTE: We only extract VALUES, not positional metadata (start/end).
-    Word index mapping is done backend-side using LLMWhisperer highlight data.
-    This is because LLMWhisperer returns line-level bounding boxes, not word-level,
-    so we map word indexes to line numbers for highlighting.
+    NOTE: We only extract VALUES, not word_indexes.
+    Word index mapping is done backend-side using exact string matching.
+    This ensures precise word-level highlighting without relying on LLM positional guesses.
     """
     template_keys = list(template.keys())
     template_keys_json = json.dumps(template_keys, indent=2)
@@ -175,20 +178,16 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
         "Return STRICT JSON in this exact format:",
         "{",
         '  "field_key": {',
-        '    "value": "extracted value or null if not found",',
-        '    "word_indexes": [0, 1, 2, ...] or []',
+        '    "value": "extracted value or null if not found"',
         "  },",
         "  ...",
         "}",
         "",
         "Rules:",
         "- Never invent fields not in the template.",
-        "- If a value is not found, return value=null, word_indexes=[].",
-        "- word_indexes should be an array of word indexes (0-based) where the value appears.",
-        "- Split the text on whitespace to determine word indexes.",
-        "- For multi-word values, include all word indexes in the array.",
-        "- If you cannot determine word indexes, return an empty array [].",
-        "- Extract ONLY the value - do not compute character positions.",
+        "- If a value is not found, return value=null.",
+        "- Extract ONLY the value - do not compute word indexes or positions.",
+        "- Return the exact value as it appears in the text.",
         "- No explanations, no prose, only JSON.",
     ]
 
@@ -236,31 +235,72 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
 
         if not isinstance(field_data, dict):
             logger.warning(f"Invalid field data format for {field_key}: {type(field_data)}")
-            result[field_key] = {"value": None, "word_indexes": []}
+            result[field_key] = {"value": None}
             continue
 
-        # Extract value and word_indexes only
-        word_indexes = field_data.get("word_indexes", [])
-        if not isinstance(word_indexes, list):
-            word_indexes = []
-        else:
-            # Ensure all are integers
-            try:
-                word_indexes = [int(idx) for idx in word_indexes if isinstance(idx, (int, str))]
-            except (ValueError, TypeError):
-                word_indexes = []
-
+        # Extract value only (word_indexes determined backend-side)
         result[field_key] = {
             "value": field_data.get("value"),
-            "word_indexes": word_indexes,
         }
 
     # Ensure all template fields are present
     for key in template_keys:
         if key not in result:
-            result[key] = {"value": None, "word_indexes": []}
+            result[key] = {"value": None}
 
     return result
+
+
+def _find_word_indexes_for_value(value: str, tokenized_text: List[str]) -> List[int]:
+    """
+    Find word indexes for a field value using exact string matching.
+    
+    Searches for the value in the tokenized text and returns the word indexes.
+    Handles multi-word values by finding consecutive word matches.
+    
+    Args:
+        value: The field value to find
+        tokenized_text: List of words from splitting text on whitespace
+        
+    Returns:
+        List of word indexes (0-based) where the value appears
+    """
+    if not value or not tokenized_text:
+        return []
+    
+    # Normalize value: strip whitespace, handle case-insensitive matching
+    value_normalized = value.strip().lower()
+    value_words = value_normalized.split()
+    
+    if not value_words:
+        return []
+    
+    # Search for the value in tokenized text
+    word_indexes = []
+    
+    # Try to find exact match of all words
+    for i in range(len(tokenized_text) - len(value_words) + 1):
+        # Check if words match starting at position i
+        match = True
+        for j, value_word in enumerate(value_words):
+            if i + j >= len(tokenized_text):
+                match = False
+                break
+            token_word = tokenized_text[i + j].strip().lower()
+            # Remove punctuation for comparison
+            token_word = ''.join(c for c in token_word if c.isalnum() or c.isspace())
+            value_word_clean = ''.join(c for c in value_word if c.isalnum() or c.isspace())
+            if token_word != value_word_clean:
+                match = False
+                break
+        
+        if match:
+            # Found match, add all word indexes
+            word_indexes.extend(range(i, i + len(value_words)))
+            break  # Take first match only
+    
+    # Remove duplicates and sort
+    return sorted(list(set(word_indexes)))
 
 
 def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
@@ -272,6 +312,58 @@ def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
         }
         for key in template.keys()
     }
+
+
+def _find_word_indexes_for_value(value: str, tokenized_text: List[str]) -> List[int]:
+    """
+    Find word indexes for a field value using exact string matching.
+    
+    Searches for the value in the tokenized text and returns the word indexes.
+    Handles multi-word values by finding consecutive word matches.
+    
+    Args:
+        value: The field value to find
+        tokenized_text: List of words from splitting text on whitespace
+        
+    Returns:
+        List of word indexes (0-based) where the value appears
+    """
+    if not value or not tokenized_text:
+        return []
+    
+    # Normalize value: strip whitespace, handle case-insensitive matching
+    value_normalized = value.strip().lower()
+    value_words = value_normalized.split()
+    
+    if not value_words:
+        return []
+    
+    # Search for the value in tokenized text
+    word_indexes = []
+    
+    # Try to find exact match of all words
+    for i in range(len(tokenized_text) - len(value_words) + 1):
+        # Check if words match starting at position i
+        match = True
+        for j, value_word in enumerate(value_words):
+            if i + j >= len(tokenized_text):
+                match = False
+                break
+            token_word = tokenized_text[i + j].strip().lower()
+            # Remove punctuation for comparison
+            token_word = ''.join(c for c in token_word if c.isalnum() or c.isspace())
+            value_word_clean = ''.join(c for c in value_word if c.isalnum() or c.isspace())
+            if token_word != value_word_clean:
+                match = False
+                break
+        
+        if match:
+            # Found match, add all word indexes
+            word_indexes.extend(range(i, i + len(value_words)))
+            break  # Take first match only
+    
+    # Remove duplicates and sort
+    return sorted(list(set(word_indexes)))
 
 
 def _extract_line_metadata(bounding_boxes: Dict[str, Any]) -> List[Dict[str, Any]]:

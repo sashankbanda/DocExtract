@@ -31,28 +31,15 @@ export function StructuredTablePanel({
   isLoading = false,
 }: StructuredTablePanelProps) {
   const [isAnimating, setIsAnimating] = useState(false);
-  const handleRowClick = (lineNumbers: number[], wordIndexes: number[]) => {
-    // Prefer line_numbers for highlighting, fallback to word_indexes
-    if (onFieldClick) {
-      if (lineNumbers.length > 0) {
-        // Pass line_numbers - the handler will convert to line-based highlighting
-        onFieldClick(lineNumbers);
-      } else if (wordIndexes.length > 0) {
-        onFieldClick(wordIndexes);
-      }
+  const handleRowClick = (wordIndexes: number[]) => {
+    if (onFieldClick && wordIndexes.length > 0) {
+      onFieldClick(wordIndexes);
     }
   };
 
-  const handleRowHover = (lineNumbers: number[] | null, wordIndexes: number[] | null) => {
-    // Prefer line_numbers for highlighting
+  const handleRowHover = (wordIndexes: number[] | null) => {
     if (onFieldHover) {
-      if (lineNumbers && lineNumbers.length > 0) {
-        onFieldHover(lineNumbers);
-      } else if (wordIndexes) {
-        onFieldHover(wordIndexes);
-      } else {
-        onFieldHover(null);
-      }
+      onFieldHover(wordIndexes);
     }
   };
 
@@ -66,14 +53,13 @@ export function StructuredTablePanel({
   }, [structuredFields]);
 
   // Convert structuredFields object to array of entries
-  // Use line_numbers for highlighting (LLMWhisperer returns line-level boxes, not word-level)
+  // Use word_indexes for highlighting (backend generates word-level boxes)
   const fields = structuredFields
     ? Object.entries(structuredFields)
         .map(([key, data]) => ({
           key,
           value: data.value || "",
           word_indexes: data.word_indexes || [],
-          line_numbers: data.line_numbers || [],
         }))
         .filter((field) => field.value !== null && field.value !== "")
     : [];
@@ -162,11 +148,11 @@ export function StructuredTablePanel({
                   transition={{ delay: index * 0.03, duration: 0.2 }}
                   className={cn(
                     "border-t border-border/30 transition-all duration-200",
-                    (field.line_numbers.length > 0 || field.word_indexes.length > 0) && "hover:bg-primary/10 hover:border-primary/30 cursor-pointer"
+                    field.word_indexes.length > 0 && "hover:bg-primary/10 hover:border-primary/30 cursor-pointer"
                   )}
-                  onMouseEnter={() => handleRowHover(field.line_numbers, field.word_indexes)}
-                  onMouseLeave={() => handleRowHover(null, null)}
-                  onClick={() => handleRowClick(field.line_numbers, field.word_indexes)}
+                  onMouseEnter={() => handleRowHover(field.word_indexes)}
+                  onMouseLeave={() => handleRowHover(null)}
+                  onClick={() => handleRowClick(field.word_indexes)}
                 >
                   <td className="px-4 py-3 font-medium text-foreground">
                     {field.key}

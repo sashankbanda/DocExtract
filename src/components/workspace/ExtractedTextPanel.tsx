@@ -39,18 +39,23 @@ export function ExtractedTextPanel({
     const pages = document.pages as any[] | null;
     const boundingBoxes = document.boundingBoxes as Record<string, unknown> | null;
 
-    // Build word index lookup from bounding boxes
-    const wordIndexLookup = new Map<number, { text: string; page: number }>();
+    // Build word index to text mapping from tokenized text
+    // The backend tokenizes text by splitting on whitespace, so we do the same
+    const tokenizedText = document.text.split(/\s+/).filter(w => w.trim() !== "");
+    const wordIndexToText = new Map<number, string>();
+    tokenizedText.forEach((word, index) => {
+      wordIndexToText.set(index, word);
+    });
+    
+    // Build word index to page mapping from bounding boxes
+    const wordIndexToPage = new Map<number, number>();
     if (boundingBoxes) {
       const words = (boundingBoxes.words as any[]) || [];
       const pagesData = (boundingBoxes.pages as any[]) || [];
 
       words.forEach((word: any) => {
         if (word?.index !== undefined) {
-          wordIndexLookup.set(word.index, {
-            text: word.text || "",
-            page: word.page || 1,
-          });
+          wordIndexToPage.set(word.index, word.page || 1);
         }
       });
 
@@ -58,10 +63,7 @@ export function ExtractedTextPanel({
         const pageNum = page.page ?? page.index ?? 1;
         (page.words || []).forEach((word: any) => {
           if (word?.index !== undefined) {
-            wordIndexLookup.set(word.index, {
-              text: word.text || "",
-              page: pageNum,
-            });
+            wordIndexToPage.set(word.index, pageNum);
           }
         });
       });
@@ -96,23 +98,45 @@ export function ExtractedTextPanel({
       });
 
       // Create sections for each page
+      // Map lines to word indexes by matching words in tokenized text
+      let globalWordIndex = 0;
       pagesMap.forEach((lines, pageNum) => {
         const pageLines = lines
-          .map((line, idx) => {
-            // Extract word indexes for this line (simplified - would need better parsing)
+          .map((line) => {
+            // Extract word indexes for this line by matching words sequentially
             const wordIndexes: number[] = [];
-            const words = line.split(/\s+/);
-            let wordIdx = 0;
-            words.forEach((word) => {
-              // Try to find matching word index
-              for (const [index, data] of wordIndexLookup.entries()) {
-                if (data.text === word && data.page === pageNum) {
-                  wordIndexes.push(index);
-                  break;
+            const lineWords = line.split(/\s+/).filter(w => w.trim() !== "");
+            
+            // Match words starting from current global word index
+            let searchStartIndex = globalWordIndex;
+            for (const lineWord of lineWords) {
+              // Find matching word in tokenized text starting from searchStartIndex
+              let found = false;
+              for (let i = searchStartIndex; i < tokenizedText.length; i++) {
+                // Normalize for comparison (remove punctuation)
+                const normalizedLineWord = lineWord.replace(/[^\w\s]/g, '').toLowerCase();
+                const normalizedTokenWord = tokenizedText[i].replace(/[^\w\s]/g, '').toLowerCase();
+                
+                if (normalizedLineWord === normalizedTokenWord || 
+                    tokenizedText[i].includes(lineWord) || 
+                    lineWord.includes(tokenizedText[i])) {
+                  // Check if this word belongs to the correct page
+                  const wordPage = wordIndexToPage.get(i) || 1;
+                  if (wordPage === pageNum || wordIndexToPage.size === 0) {
+                    wordIndexes.push(i);
+                    searchStartIndex = i + 1;
+                    found = true;
+                    break;
+                  }
                 }
               }
-              wordIdx++;
-            });
+              if (!found) {
+                // If not found, increment search index anyway to avoid infinite loop
+                searchStartIndex++;
+              }
+            }
+            
+            globalWordIndex = searchStartIndex;
 
             return {
               text: line,
@@ -130,13 +154,40 @@ export function ExtractedTextPanel({
       });
     } else {
       // Single page - split by lines
+      // Map lines to word indexes by matching words in tokenized text
       const lines = document.text.split("\n").filter((line) => line.trim() !== "");
+      let globalWordIndex = 0;
+      const pageLines = lines.map((line) => {
+        const wordIndexes: number[] = [];
+        const lineWords = line.split(/\s+/).filter(w => w.trim() !== "");
+        
+        // Match words sequentially
+        let searchStartIndex = globalWordIndex;
+        for (const lineWord of lineWords) {
+          for (let i = searchStartIndex; i < tokenizedText.length; i++) {
+            const normalizedLineWord = lineWord.replace(/[^\w\s]/g, '').toLowerCase();
+            const normalizedTokenWord = tokenizedText[i].replace(/[^\w\s]/g, '').toLowerCase();
+            
+            if (normalizedLineWord === normalizedTokenWord || 
+                tokenizedText[i].includes(lineWord) || 
+                lineWord.includes(tokenizedText[i])) {
+              wordIndexes.push(i);
+              searchStartIndex = i + 1;
+              break;
+            }
+          }
+        }
+        globalWordIndex = searchStartIndex;
+        
+        return {
+          text: line,
+          wordIndexes,
+        };
+      });
+      
       sections.push({
         pageNumber: 1,
-        lines: lines.map((line) => ({
-          text: line,
-          wordIndexes: [], // Would need better parsing for word indexes
-        })),
+        lines: pageLines,
       });
     }
 

@@ -1,7 +1,6 @@
 export interface StructuredFieldData {
   value: string | null;
-  word_indexes: number[];
-  line_numbers: number[]; // Line numbers for highlighting (1-based)
+  word_indexes: number[]; // Word indexes for highlighting (0-based)
 }
 
 export interface UploadFile {

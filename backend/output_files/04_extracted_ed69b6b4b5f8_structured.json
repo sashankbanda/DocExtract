@@ -1,0 +1,379 @@
+{
+    "fields": {
+        "lob": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "insured": {
+            "value": "ABCAING HOMEC",
+            "word_indexes": [
+                8,
+                9
+            ],
+            "line_numbers": []
+        },
+        "dba": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "policyNumber": {
+            "value": "P1234",
+            "word_indexes": [
+                6
+            ],
+            "line_numbers": []
+        },
+        "effdate": {
+            "value": "6/1/2024",
+            "word_indexes": [
+                6
+            ],
+            "line_numbers": []
+        },
+        "expdate": {
+            "value": "6/1/2025",
+            "word_indexes": [
+                6
+            ],
+            "line_numbers": []
+        },
+        "carrier": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "valuedDate": {
+            "value": "12/30/3023",
+            "word_indexes": [
+                30
+            ],
+            "line_numbers": []
+        },
+        "claimNumber": {
+            "value": "123",
+            "word_indexes": [
+                10
+            ],
+            "line_numbers": []
+        },
+        "claimant": {
+            "value": "SYDIA",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "claimStatus": {
+            "value": "O",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "closedDate": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "reportedDate": {
+            "value": "8/6/18",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "dateOfLoss": {
+            "value": "8/6/18",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "lossDescription": {
+            "value": "Some loss description",
+            "word_indexes": [
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                29,
+                30
+            ],
+            "line_numbers": []
+        },
+        "lossLocation": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "state": {
+            "value": "Yt",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "city": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "medicalPaid": {
+            "value": "0",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "medicalPaid2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "medicalPaid3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "medicalReserves": {
+            "value": "5010",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "medicalReserves2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "medicalReserves3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityPaid": {
+            "value": "0",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "indemnityPaid2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityPaid3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityPaid4": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityPaid5": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityPaid6": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityReserves": {
+            "value": "10000",
+            "word_indexes": [
+                16
+            ],
+            "line_numbers": []
+        },
+        "indemnityReserves2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityReserves3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityReserves4": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityReserves5": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "indemnityReserves6": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid4": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid5": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesPaid6": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves4": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves5": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "expensesReserves6": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalPaid": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalPaid2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalReserve": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalReserve2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalIncurredSource": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries2": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries3": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries4": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries5": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "recoveries6": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalMedical": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalIndemnity": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "totalExpenses": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "inferredCurrency": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        },
+        "pageNumber": {
+            "value": "1",
+            "word_indexes": [
+                3
+            ],
+            "line_numbers": []
+        },
+        "sheetName": {
+            "value": "",
+            "word_indexes": [],
+            "line_numbers": []
+        }
+    }
+}

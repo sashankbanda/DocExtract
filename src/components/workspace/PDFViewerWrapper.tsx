@@ -12,12 +12,10 @@ interface PDFViewerWrapperProps {
   documentId: string;
   fileName?: string;
   pdfSource?: string | File | ArrayBuffer | Uint8Array; // URL, File, or ArrayBuffer
-  // New API: for line number-based highlighting
-  // NOTE: LLMWhisperer returns line-level bounding boxes, not word-level
-  // We use line_numbers for highlighting instead of word_indexes
-  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains line_metadata)
-  selectedIndexes?: number[]; // Word indexes (legacy, for backward compatibility)
-  activeLineNumbers?: number[]; // Line numbers to highlight (1-based)
+  // New API: for word index-based highlighting
+  // NOTE: Backend generates word-level boxes from line-level boxes returned by LLMWhisperer
+  boundingBoxes?: Record<string, unknown> | null; // Raw bounding box data from backend (contains word-level boxes)
+  selectedIndexes?: number[]; // Word indexes to highlight (0-based)
   activeHighlightId?: string | null; // ID of active highlight
   // Legacy API: for direct bounding box highlighting (backward compatibility)
   highlights?: BoundingBox[];
@@ -45,7 +43,6 @@ function PDFViewerWrapper({
   pdfSource,
   boundingBoxes,
   selectedIndexes = [],
-  activeLineNumbers = [],
   activeHighlightId = null,
   highlights = [],
   activeHighlight,
@@ -339,19 +336,22 @@ function PDFViewerWrapper({
     });
   }, [pageMetadata, totalPages, zoom, boundingBoxes]);
 
-  // Scroll to highlight function
+  // Scroll to highlight function - uses word indexes
   const scrollToHighlight = useCallback((wordIndexes: number[]) => {
     if (!wordIndexes.length || !boundingBoxes || !containerRef.current || !pageMetadata.length) {
       return;
     }
 
-    // Find the page for the first word index
+    // Build lookup from word-level boxes
+    const lookup = buildIndexLookup(boundingBoxes);
     const firstIndex = wordIndexes[0];
-    const page = getPageForWordIndex(firstIndex);
-    if (!page) return;
-
+    const wordBox = lookup.get(firstIndex);
+    
+    if (!wordBox) return;
+    
+    const page = wordBox.page;
     scrollToPage(page, firstIndex);
-  }, [boundingBoxes, pageMetadata, scrollToPage]);
+  }, [boundingBoxes, pageMetadata, scrollToPage, buildIndexLookup]);
 
   // Get page for word index
   const getPageForWordIndex = useCallback((wordIndex: number): number | null => {
@@ -618,13 +618,12 @@ function PDFViewerWrapper({
                   }}
                 >
                   {/* Use new API if boundingBoxes is provided */}
-                  {/* NOTE: We now use line_numbers for highlighting, not word_indexes */}
-                  {/* LLMWhisperer returns line-level bounding boxes, so we highlight entire lines */}
+                  {/* NOTE: Backend generates word-level boxes from line-level boxes */}
+                  {/* We highlight only the specific word_indexes for each field */}
                   {boundingBoxes ? (
                     <HighlightOverlay
                       boundingBoxes={boundingBoxes}
                       selectedIndexes={selectedIndexes}
-                      activeLineNumbers={activeLineNumbers}
                       pdfPageRefs={Array.from({ length: totalPages }, (_, i) => {
                         const canvas = canvasRefsRef.current.get(i + 1);
                         return { current: canvas } as React.RefObject<HTMLCanvasElement>;
