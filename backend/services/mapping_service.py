@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_CACHE: Dict[str, Dict[str, Any]] = {}
 _TEMPLATE_DIR = Path(__file__).parent.parent
 
-
 def _load_template(template_name: str = "standard_template") -> Dict[str, Any]:
     """Load template JSON file from backend directory."""
     if template_name in _TEMPLATE_CACHE:
@@ -37,18 +36,89 @@ STANDARD_TEMPLATE = _load_template("standard_template")
 
 
 def normalize_bounding_boxes(boxes: Dict[str, Any] | List[Any] | None) -> Dict[str, Any]:
-    """Normalize bounding boxes to a dict focused on line metadata."""
+    """
+    Normalize bounding boxes to a dict focused on line_metadata.
+
+    Accepts:
+      - None
+      - list of objects
+      - dict with "line_metadata": [...]
+      - dict keyed by "1","2",...
+    Returns:
+      {"line_metadata": [ { line_number, text, raw_box, page, page_height, line_index }, ... ]}
+    """
     if boxes is None:
-        return {}
+        return {"line_metadata": []}
 
+    # Already a normalized dict
+    if isinstance(boxes, dict) and "line_metadata" in boxes and isinstance(boxes["line_metadata"], list):
+        return {"line_metadata": boxes["line_metadata"]}
+
+    out_lines: List[Dict[str, Any]] = []
+
+    # If boxes is a list, assume it's directly line entries
     if isinstance(boxes, list):
-        return {"line_metadata": boxes}
+        for i, entry in enumerate(boxes):
+            if not isinstance(entry, dict):
+                continue
+            line_number = entry.get("line_number") or entry.get("line_index") or (i + 1)
+            # raw_box discovery
+            raw_box = None
+            for candidate in ("raw_box", "raw", "bbox", "box"):
+                if candidate in entry and entry[candidate]:
+                    raw_box = entry[candidate]
+                    break
+            out_lines.append(
+                {
+                    "line_number": int(line_number),
+                    "text": entry.get("text") or "",
+                    "raw_box": raw_box,
+                    "page": int(entry.get("page") or (raw_box[0] if isinstance(raw_box, list) and len(raw_box) >= 1 else 1) or 1),
+                    "page_height": entry.get("page_height") or entry.get("pageHeight") or (raw_box[3] if isinstance(raw_box, list) and len(raw_box) >= 4 else 0),
+                }
+            )
+        return {"line_metadata": out_lines}
 
-    if isinstance(boxes, dict):
-        return boxes
+    # If dict keyed by numeric strings
+    numeric_items = []
+    for k, v in boxes.items():
+        try:
+            idx = int(k)
+        except Exception:
+            continue
+        numeric_items.append((idx, v))
+    if numeric_items:
+        numeric_items.sort(key=lambda x: x[0])
+        for idx, obj in numeric_items:
+            if not isinstance(obj, dict):
+                continue
+            raw_box = None
+            for candidate in ("raw", "raw_box", "bbox", "box"):
+                if candidate in obj and obj[candidate]:
+                    raw_box = obj[candidate]
+                    break
+            if raw_box is None:
+                for v in obj.values():
+                    if isinstance(v, list) and len(v) >= 4:
+                        raw_box = v
+                        break
+            page = int(obj.get("page") or (raw_box[0] if isinstance(raw_box, list) and len(raw_box) >= 1 else 1) or 1)
+            if page == 0:
+                page = 1
+            page_height = obj.get("page_height") or obj.get("pageHeight") or (raw_box[3] if isinstance(raw_box, list) and len(raw_box) >= 4 else 0)
+            out_lines.append(
+                {
+                    "line_number": int(idx),
+                    "text": obj.get("text") or obj.get("line_text") or "",
+                    "raw_box": raw_box,
+                    "page": int(page),
+                    "page_height": int(page_height or 0)
+                }
+            )
+        return {"line_metadata": out_lines}
 
-    logger.warning(f"Unexpected bounding boxes type: {type(boxes)}, returning empty dict")
-    return {}
+    logger.warning(f"Unexpected bounding boxes type in normalize: {type(boxes)}")
+    return {"line_metadata": []}
 
 
 async def extract_fields_from_text(
@@ -63,6 +133,8 @@ async def extract_fields_from_text(
         logger.warning("Invalid or empty bounding boxes provided, extraction will proceed without citations")
         bounding_boxes = {}
 
+    # normalize bounding boxes immediately
+    bounding_boxes_norm = normalize_bounding_boxes(bounding_boxes)
     prompt = _build_extraction_prompt(text, STANDARD_TEMPLATE)
 
     groq_service = GroqService()
@@ -83,7 +155,7 @@ async def extract_fields_from_text(
         return {"fields": _create_empty_fields(STANDARD_TEMPLATE)}
 
     parsed_response = _parse_llm_response(llm_response, STANDARD_TEMPLATE)
-    line_metadata = _extract_line_metadata(bounding_boxes)
+    line_metadata = _extract_line_metadata(bounding_boxes_norm)
 
     result_fields: Dict[str, Dict[str, Any]] = {}
     for field_key, field_data in parsed_response.items():
@@ -101,8 +173,8 @@ async def extract_fields_from_text(
     return {"fields": result_fields}
 
 
+# rest of the file unchanged
 def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
-    """Build prompt for LLM extraction (values only)."""
     template_keys = list(template.keys())
     template_keys_json = json.dumps(template_keys, indent=2)
 
@@ -135,7 +207,6 @@ def _build_extraction_prompt(text: str, template: Dict[str, Any]) -> str:
 
 
 def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse LLM JSON response safely (values only)."""
     cleaned = response_text.strip()
 
     if cleaned.startswith("```"):
@@ -182,13 +253,6 @@ def _parse_llm_response(response_text: str, template: Dict[str, Any]) -> Dict[st
 
 
 def _find_citations_for_value(value: str, line_metadata: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Find citations (page, bbox, line_index) for a value using multi-strategy matching.
-    Strategies:
-    1. Exact match (case-insensitive)
-    2. Partial match (if value is long enough)
-    3. Multi-line match (if value spans lines)
-    """
     if not value or not line_metadata:
         return []
 
@@ -198,7 +262,7 @@ def _find_citations_for_value(value: str, line_metadata: List[Dict[str, Any]]) -
 
     matches: List[Dict[str, Any]] = []
 
-    # Strategy 1: Exact Line Match (Case-Insensitive)
+    # exact match
     for idx, entry in enumerate(line_metadata):
         text = (entry.get("text") or "").lower()
         if target in text:
@@ -207,55 +271,37 @@ def _find_citations_for_value(value: str, line_metadata: List[Dict[str, Any]]) -
     if matches:
         return _deduplicate_citations(matches)
 
-    # Strategy 2: Multi-line Match (for values split across lines)
-    # We'll look for the value by concatenating lines
-    # This is expensive, so we do a sliding window check
-    # We assume the value might be split across 2-3 lines max usually
-    
-    # Clean target for multi-line check (remove extra spaces)
+    # multi-line check (concatenate lines)
+    import re
     clean_target = re.sub(r'\s+', '', target)
-    
     for i in range(len(line_metadata)):
-        # Check window of 1, 2, 3 lines
         for window_size in range(1, 4):
             if i + window_size > len(line_metadata):
                 break
-            
             window_lines = line_metadata[i : i + window_size]
             combined_text = "".join([(l.get("text") or "").lower() for l in window_lines])
             clean_combined = re.sub(r'\s+', '', combined_text)
-            
             if clean_target in clean_combined:
-                # Found a match spanning these lines
                 for offset, line in enumerate(window_lines):
                     matches.append(_create_citation(line, i + offset))
-                # If we found a match in this window, we can stop checking larger windows starting at i
-                # But we might want to continue to find other occurrences? 
-                # For now, let's just return the first good multi-line match set to avoid noise
                 return _deduplicate_citations(matches)
-
-    # Strategy 3: Fuzzy / Best Effort (if needed, but sticking to strict-ish for now to avoid false positives)
-    # Could implement Levenshtein here if exact fails
 
     return _deduplicate_citations(matches)
 
 
 def _create_citation(line_entry: Dict[str, Any], index: int) -> Dict[str, Any]:
-    """Create a standardized citation object from a line entry."""
-    # Ensure bbox is always 4 integers
     raw_box = line_entry.get("raw_box") or [0, 0, 0, 0]
     if len(raw_box) < 4:
         raw_box = [0, 0, 0, 0]
-        
+
     return {
-        "page": line_entry.get("page", 1),
-        "bbox": raw_box,
-        "line_index": line_entry.get("line_index", index) # Prioritize explicit line_index
+        "page": int(line_entry.get("page", 1)),
+        "bbox": [int(raw_box[0]), int(raw_box[1]), int(raw_box[2]), int(raw_box[3])],
+        "line_index": int(line_entry.get("line_number") or line_entry.get("line_index") or index + 1)
     }
 
 
 def _deduplicate_citations(citations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Deduplicate citations based on line_index."""
     seen = set()
     unique = []
     for cit in citations:
@@ -268,7 +314,6 @@ def _deduplicate_citations(citations: List[Dict[str, Any]]) -> List[Dict[str, An
 
 
 def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
-    """Create empty field entries for all template keys."""
     return {
         key: {
             "value": "",
@@ -279,13 +324,7 @@ def _create_empty_fields(template: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _extract_line_metadata(bounding_boxes: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extract line metadata from bounding boxes."""
     if not bounding_boxes or not isinstance(bounding_boxes, dict):
         return []
-
     line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
-    if isinstance(line_metadata, list):
-        return line_metadata
-
-    return []
-
+    return line_metadata if isinstance(line_metadata, list) else []

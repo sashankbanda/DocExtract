@@ -34,7 +34,7 @@ def format_upload_response(extraction_result: Dict[str, Any]) -> Dict[str, Any]:
     bounding_boxes = _safe_get(extraction_result, "bounding_boxes")
     if bounding_boxes:
         try:
-            bboxes_path = get_output_path(file_name, suffix="_bboxes", prefix="03")
+            bboxes_path = get_output_path(file_name, suffix="_bboxes", prefix="03", extension="json")
             formatted_bboxes = _format_bounding_boxes_for_save(
                 bounding_boxes, result_text, whisper_hash
             )
@@ -62,58 +62,110 @@ def _format_bounding_boxes_for_save(
 ) -> Dict[str, Any]:
     """
     Format bounding boxes for saving with line-level metadata only.
+    Accepts:
+      - dict with 'line_metadata' list
+      - dict keyed by '1','2',... (LLMWhisperer original shape)
+      - list of line objects
+    Output shape:
+    {
+      "whisperHash": "...",
+      "line_metadata": [
+         { "line_number": int, "text": str, "raw_box": [p,y,h,page_h], "page": int, "page_height": int }
+      ]
+    }
     """
     lines = result_text.split("\n")
     formatted_lines: List[Dict[str, Any]] = []
 
+    # If it's already a friendly dict...
     raw_line_metadata = None
     if isinstance(bounding_boxes, dict):
-        raw_line_metadata = bounding_boxes.get("line_metadata") or bounding_boxes.get("lines")
+        if "line_metadata" in bounding_boxes and isinstance(bounding_boxes["line_metadata"], list):
+            raw_line_metadata = bounding_boxes["line_metadata"]
+        else:
+            # maybe keyed by "1", "2", ...
+            # convert to list preserving numeric order
+            # include only entries that are dict-like
+            numeric_items = []
+            for k, v in bounding_boxes.items():
+                try:
+                    idx = int(k)
+                except Exception:
+                    continue
+                if isinstance(v, dict):
+                    numeric_items.append((idx, v))
+            if numeric_items:
+                numeric_items.sort(key=lambda x: x[0])
+                raw_line_metadata = [v for _, v in numeric_items]
+
     elif isinstance(bounding_boxes, list):
         raw_line_metadata = bounding_boxes
 
-    if raw_line_metadata and isinstance(raw_line_metadata, list):
-        for idx, line_data in enumerate(raw_line_metadata):
-            if not isinstance(line_data, dict):
-                continue
+    if not raw_line_metadata:
+        # nothing to save: return empty list
+        return {"whisperHash": whisper_hash, "line_metadata": []}
 
-            line_number = line_data.get("line_number") or line_data.get("line_no") or line_data.get("line") or (idx + 1)
-            text = line_data.get("text") or (lines[line_number - 1] if 0 <= line_number - 1 < len(lines) else "")
-            raw_box = line_data.get("raw_box") or line_data.get("raw") or line_data.get("bbox") or line_data.get("box")
+    for idx, line_data in enumerate(raw_line_metadata):
+        if not isinstance(line_data, dict):
+            continue
 
-            if isinstance(raw_box, list) and len(raw_box) >= 4:
-                box_vals = raw_box[:4]
-            elif isinstance(raw_box, dict):
-                box_vals = [
-                    raw_box.get("page") or raw_box.get("x") or raw_box.get("left") or 0,
-                    raw_box.get("base_y") or raw_box.get("y") or raw_box.get("top") or 0,
-                    raw_box.get("height") or raw_box.get("h") or 0,
-                    raw_box.get("page_height") or raw_box.get("pageHeight") or 0,
-                ]
-            else:
-                continue
+        # Determine line_number
+        line_number = (
+            line_data.get("line_number")
+            or line_data.get("line_index")
+            or line_data.get("line_no")
+            or line_data.get("line")
+            or (idx + 1)
+        )
 
+        # text fallback from the extracted text lines (1-based)
+        try:
+            ln_idx = int(line_number) - 1
+            text_val = line_data.get("text") or (lines[ln_idx] if 0 <= ln_idx < len(lines) else "")
+        except Exception:
+            text_val = line_data.get("text") or ""
+
+        # raw_box may appear under several keys
+        raw_box = None
+        for candidate in ("raw_box", "raw", "bbox", "box"):
+            if candidate in line_data and line_data[candidate]:
+                raw_box = line_data[candidate]
+                break
+
+        # If raw_box is dict, try mapping keys
+        if isinstance(raw_box, dict):
+            page = int(raw_box.get("page", 1) or 1)
+            base_y = int(raw_box.get("base_y", raw_box.get("y", 0) or 0))
+            height = int(raw_box.get("height", raw_box.get("h", 0) or 0))
+            page_height = int(raw_box.get("page_height", raw_box.get("pageHeight", 0) or 0))
+            box_vals = [page, base_y, height, page_height]
+        elif isinstance(raw_box, list) and len(raw_box) >= 4:
             try:
-                box_ints = [int(float(v)) for v in box_vals]
-            except (TypeError, ValueError):
+                box_vals = [int(float(v)) for v in raw_box[:4]]
+            except Exception:
                 continue
+        else:
+            # no usable box
+            continue
 
-            if len(box_ints) < 4 or any(v is None for v in box_ints):
-                continue
-            if all(v == 0 for v in box_ints):
-                continue
+        # ignore placeholder all zeros
+        if all(v == 0 for v in box_vals):
+            continue
 
-            formatted_lines.append(
-                {
-                    "line_number": int(line_number),
-                    "text": text,
-                    "raw_box": [int(box_ints[0]), int(box_ints[1]), int(box_ints[2]), int(box_ints[3])],
-                    "page": int(line_data.get("page") or 1),
-                    "page_height": line_data.get("page_height") or line_data.get("pageHeight") or box_ints[3],
-                }
-            )
+        page_val = int(line_data.get("page") or box_vals[0] or 1)
+        if page_val == 0:
+            page_val = 1
 
-    return {
-        "whisperHash": whisper_hash,
-        "line_metadata": formatted_lines,
-    }
+        page_height_val = int(line_data.get("page_height") or box_vals[3] or 0)
+
+        formatted_lines.append(
+            {
+                "line_number": int(line_number),
+                "text": text_val,
+                "raw_box": [int(box_vals[0]), int(box_vals[1]), int(box_vals[2]), int(box_vals[3])],
+                "page": int(page_val),
+                "page_height": int(page_height_val),
+            }
+        )
+
+    return {"whisperHash": whisper_hash, "line_metadata": formatted_lines}
